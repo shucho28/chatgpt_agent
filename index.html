@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Persona</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Prevent scrolling */
+        }
+
+        /* --- Orb Styles & Animations --- */
+        .orb {
+            width: 250px; /* Made the orb a bit bigger */
+            height: 250px;
+            border-radius: 50%;
+            position: relative;
+            background: radial-gradient(circle, #5a67d8 0%, #3c366b 100%);
+            box-shadow: 0 0 20px #5a67d8, 0 0 40px #5a67d8, 0 0 60px #c4b5fd;
+            transition: all 0.5s ease-in-out;
+        }
+
+        /* IDLE state animation */
+        @keyframes idlePulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 20px #5a67d8, 0 0 40px #5a67d8, 0 0 60px #c4b5fd; }
+            50% { transform: scale(1.05); box-shadow: 0 0 25px #6a7ae9, 0 0 50px #6a7ae9, 0 0 75px #d8cffc; }
+        }
+        .orb.idle {
+            animation: idlePulse 4s infinite ease-in-out;
+            background: radial-gradient(circle, #4a55b8 0%, #2c265b 100%);
+        }
+        
+        /* LISTENING state */
+        .orb.listening {
+            transform: scale(1.1);
+            background: radial-gradient(circle, #6a7ae9 0%, #4c468b 100%);
+        }
+
+        /* THINKING state animation */
+        @keyframes thinkingSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .orb.thinking::before {
+            content: '';
+            position: absolute;
+            top: -10px;
+            left: -10px;
+            width: 270px;
+            height: 270px;
+            border-radius: 50%;
+            border: 4px solid transparent;
+            border-top-color: #a78bfa;
+            border-bottom-color: #a78bfa;
+            animation: thinkingSpin 1.5s linear infinite;
+        }
+        .orb.thinking {
+            transform: scale(0.95);
+        }
+
+        /* SPEAKING state animation */
+        @keyframes speakingGlow {
+            0%, 100% { box-shadow: 0 0 20px #8b5cf6, 0 0 40px #8b5cf6, 0 0 60px #ddd6fe; transform: scale(1.02); }
+            50% { box-shadow: 0 0 30px #a78bfa, 0 0 60px #a78bfa, 0 0 90px #ede9fe; transform: scale(1.05); }
+        }
+        .orb.speaking {
+            animation: speakingGlow 1.2s infinite ease-in-out;
+        }
+        .status-text {
+            position: absolute;
+            bottom: -50px;
+            width: 100%;
+            text-align: center;
+            font-size: 1.1rem;
+            color: #a0aec0;
+            transition: opacity 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center h-screen">
+
+    <div id="settings-modal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-2xl w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4 text-center">Connect to Assistant</h2>
+            <p class="text-gray-400 mb-6 text-center">Enter your OpenAI credentials to begin. You will need to grant microphone access.</p>
+            <div class="space-y-4">
+                <div>
+                    <label for="apiKey" class="block text-sm font-medium text-gray-300">OpenAI API Key</label>
+                    <input type="password" id="apiKey" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="sk-...">
+                </div>
+                <div>
+                    <label for="assistantId" class="block text-sm font-medium text-gray-300">Assistant ID</label>
+                    <input type="text" id="assistantId" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="asst_...">
+                </div>
+            </div>
+            <button id="saveSettings" class="mt-8 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Connect</button>
+        </div>
+    </div>
+    
+    <div class="relative flex items-center justify-center">
+        <!-- Persona Orb -->
+        <div id="persona-orb" class="orb idle"></div>
+        <div id="status-text" class="status-text">Initializing...</div>
+    </div>
+
+    <script>
+        const personaOrb = document.getElementById('persona-orb');
+        const statusText = document.getElementById('status-text');
+
+        // Settings Modal
+        const settingsModal = document.getElementById('settings-modal');
+        const saveSettingsBtn = document.getElementById('saveSettings');
+        const apiKeyInput = document.getElementById('apiKey');
+        const assistantIdInput = document.getElementById('assistantId');
+
+        let apiKey = '';
+        let assistantId = '';
+        let threadId = null;
+        let isSpeaking = false;
+        let isRecognitionActive = false; // Flag to prevent recognition restart errors
+
+        // --- Speech Recognition & Synthesis Setup ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+
+        function startListening() {
+            if (isSpeaking || isRecognitionActive || !recognition) return;
+            try {
+                recognition.start();
+            } catch (e) {
+                // This can happen if start() is called while it's already starting.
+                // The onend handler will manage the restart, so we can ignore this.
+                console.info("Recognition could not be started, likely already starting. State will be managed by onend.", e);
+                isRecognitionActive = false;
+            }
+        }
+
+        function stopListening() {
+            if (!recognition || !isRecognitionActive) return;
+            recognition.stop();
+        }
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false; 
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+
+            recognition.onstart = () => {
+                isRecognitionActive = true;
+                setPersonaState('listening', 'Listening...');
+            };
+
+            recognition.onend = () => {
+                isRecognitionActive = false;
+                // This is the single, reliable place to control the listening loop.
+                // It fires after a successful result, a no-speech timeout, or an error.
+                if (!isSpeaking && !personaOrb.classList.contains('thinking')) {
+                    setPersonaState('idle', 'Ready');
+                    setTimeout(() => startListening(), 100); 
+                }
+            };
+            
+            recognition.onspeechstart = () => {
+                 setPersonaState('listening', 'I hear you...');
+            };
+
+            recognition.onerror = (event) => {
+                // The 'no-speech' error is a normal timeout and not a cause for concern.
+                // We will not log it to the console. The 'onend' event handles the restart gracefully.
+                if (event.error !== 'no-speech') {
+                    console.error('Speech recognition error:', event.error);
+                }
+                if (event.error === 'not-allowed') {
+                     setPersonaState('idle', 'Microphone access denied.');
+                     recognition = null; // Permanently disable if not allowed.
+                }
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript.trim();
+                if (transcript) {
+                    handleUserMessage(transcript);
+                }
+                // No need to call stopListening() here, as `onend` will fire automatically.
+            };
+
+        } else {
+            setPersonaState('idle', "Voice input not supported.")
+        }
+
+        // --- New TTS Functions ---
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        function pcmToWav(pcmData, sampleRate) {
+            const numChannels = 1;
+            const bitsPerSample = 16;
+            const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+            const blockAlign = numChannels * bitsPerSample / 8;
+            const dataSize = pcmData.byteLength;
+            const chunkSize = 36 + dataSize;
+            
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+
+            // RIFF header
+            view.setUint32(0, 0x52494646, false); // "RIFF"
+            view.setUint32(4, chunkSize, true);
+            view.setUint32(8, 0x57415645, false); // "WAVE"
+            // "fmt " sub-chunk
+            view.setUint32(12, 0x666d7420, false); // "fmt "
+            view.setUint32(16, 16, true); // Sub-chunk size
+            view.setUint16(20, 1, true); // Audio format (1 for PCM)
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+            // "data" sub-chunk
+            view.setUint32(36, 0x64617461, false); // "data"
+            view.setUint32(40, dataSize, true);
+
+            const pcmAsInt16 = new Int16Array(pcmData);
+            const data = new Int16Array(buffer, 44);
+            data.set(pcmAsInt16);
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+
+        async function speak(text) {
+            if (!text) {
+                 isSpeaking = false; // Ensure state is correct
+                 setPersonaState('idle', 'Ready');
+                 startListening();
+                 return;
+            }
+            isSpeaking = true;
+            stopListening(); // Explicitly stop before speaking
+            setPersonaState('speaking', '...');
+            
+            try {
+                // Use an empty API key for Google's TTS, as the environment provides it.
+                const geminiApiKey = ""; 
+                const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiApiKey}`;
+                const payload = {
+                    contents: [{ parts: [{ text: text }] }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: {
+                            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } // A pleasant, upbeat voice
+                        }
+                    },
+                    model: "gemini-2.5-flash-preview-tts"
+                };
+
+                const response = await fetch(ttsApiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    console.error('TTS API Error:', error);
+                    throw new Error('Failed to generate audio.');
+                }
+
+                const result = await response.json();
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (audioData && mimeType && mimeType.startsWith("audio/")) {
+                    const sampleRateMatch = mimeType.match(/rate=(\d+)/);
+                    const sampleRate = sampleRateMatch ? parseInt(sampleRateMatch[1], 10) : 24000;
+                    const pcmData = base64ToArrayBuffer(audioData);
+                    const wavBlob = pcmToWav(pcmData, sampleRate);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+                    
+                    const audio = new Audio(audioUrl);
+                    audio.onended = () => {
+                        isSpeaking = false;
+                        setPersonaState('idle', 'Ready');
+                        URL.revokeObjectURL(audioUrl);
+                        startListening(); // Kickstart the listening loop
+                    };
+                    audio.onerror = (e) => {
+                         console.error('Audio playback error', e);
+                         isSpeaking = false;
+                         setPersonaState('idle', 'Audio Error');
+                         startListening(); // Attempt to recover
+                    };
+                    audio.play();
+                } else {
+                     throw new Error('No audio data in response.');
+                }
+
+            } catch(e) {
+                 console.error('Error in speak function:', e);
+                 isSpeaking = false;
+                 setPersonaState('idle', 'TTS Failed');
+                 startListening(); // Attempt to recover
+            }
+        }
+
+
+        // --- State Management ---
+        function setPersonaState(state, text) {
+            personaOrb.className = 'orb'; // Reset classes
+            personaOrb.classList.add(state);
+            statusText.textContent = text || '';
+        }
+
+        // --- OpenAI Assistant API Interaction ---
+        
+        async function createThread() {
+            try {
+                const response = await fetch('https://api.openai.com/v1/threads', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                        'OpenAI-Beta': 'assistants=v2'
+                    }
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API Error: ${errorData.error.message}`);
+                }
+                const data = await response.json();
+                threadId = data.id;
+                console.log("Thread created:", threadId);
+                setPersonaState('idle', "Ready");
+                startListening();
+            } catch (error) {
+                console.error(error);
+                setPersonaState('idle', 'Connection failed.');
+            }
+        }
+
+        async function handleUserMessage(prompt) {
+            if (!prompt) return;
+            
+            // Recognition has already stopped via the onresult event.
+            setPersonaState('thinking', 'Thinking...');
+
+            if (!threadId) {
+                await createThread();
+                if(!threadId) {
+                    await speak("I couldn't start a conversation. Please check the API keys and refresh.");
+                    return;
+                }
+            }
+            
+            try {
+                // 1. Add message to thread
+                await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                        'OpenAI-Beta': 'assistants=v2'
+                    },
+                    body: JSON.stringify({
+                        role: 'user',
+                        content: prompt
+                    })
+                });
+
+                // 2. Create a run
+                const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                        'OpenAI-Beta': 'assistants=v2'
+                    },
+                    body: JSON.stringify({
+                        assistant_id: assistantId
+                    })
+                });
+                const run = await runResponse.json();
+
+                // 3. Poll for run completion
+                let runStatus;
+                do {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    const statusResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${run.id}`, {
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'OpenAI-Beta': 'assistants=v2'
+                        }
+                    });
+                    const statusData = await statusResponse.json();
+                    runStatus = statusData.status;
+                } while (runStatus === 'in_progress' || runStatus === 'queued');
+
+                if(runStatus !== 'completed') {
+                    throw new Error(`Run finished with status: ${runStatus}`);
+                }
+
+                // 4. Retrieve latest messages
+                const messagesResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'OpenAI-Beta': 'assistants=v2'
+                    }
+                });
+                const messagesData = await messagesResponse.json();
+                const assistantMessage = messagesData.data[0].content[0].text.value;
+                
+                await speak(assistantMessage);
+
+            } catch (error) {
+                console.error("Error during assistant interaction:", error);
+                await speak("I'm having trouble connecting. Please try again in a moment.");
+            }
+        }
+
+        // --- Event Listeners ---
+        saveSettingsBtn.addEventListener('click', () => {
+            apiKey = apiKeyInput.value.trim();
+            assistantId = assistantIdInput.value.trim();
+            if (apiKey && assistantId) {
+                settingsModal.style.display = 'none';
+                createThread();
+            } else {
+                alert('Please provide both API Key and Assistant ID.');
+            }
+        });
+
+        // Add a click listener to the body to start on user interaction
+        document.body.addEventListener('click', () => {
+            if(recognition && !isSpeaking && !isRecognitionActive) {
+                startListening();
+            }
+        }, { once: true });
+
+
+        // Initial State
+        setPersonaState('idle', 'Connecting...');
+
+    </script>
+</body>
+</html>
+
