@@ -534,7 +534,7 @@
                 startVoiceRecording();
                 
                 console.log('✅ Voice assistant ready - tap the orb and speak!');
-                setPersonaState('idle', 'Ready');
+                setPersonaState('idle', 'Ready - Tap orb to record');
                 isConnected = true;
                 
                 // Show mode indicator briefly
@@ -628,8 +628,8 @@
                 source.connect(analyser);
                 
                 let isSpeechDetected = false;
-                const speechThreshold = 35; // Adjusted for better sensitivity
-                const silenceDelay = 1200; // ms - slightly shorter for responsiveness
+                const speechThreshold = 25; // Lower threshold for better sensitivity
+                const silenceDelay = 1000; // ms - shorter for better responsiveness
                 
                 function detectVoiceActivity() {
                     if (!isConnected) return;
@@ -639,6 +639,11 @@
                     // Focus on speech frequency range (85Hz - 255Hz is roughly index 4-12 for 512 FFT)
                     const speechRange = dataArray.slice(4, 32);
                     const average = speechRange.reduce((a, b) => a + b) / speechRange.length;
+                    
+                    // Debug audio levels every few frames
+                    if (Math.random() < 0.01) { // Log ~1% of the time to avoid spam
+                        console.log('🔊 Audio level:', Math.round(average), 'threshold:', speechThreshold);
+                    }
                     
                     if (average > speechThreshold && !isRecording && !isSpeaking) {
                         // Speech started
@@ -1018,7 +1023,7 @@
             }
         }
 
-        // Enhanced touch/click interaction for iPad with Realtime API
+        // Enhanced touch/click interaction for iPad with voice system
         let isActivated = false;
         
         async function activateAssistant() {
@@ -1042,11 +1047,57 @@
             }
         }
         
+        // Manual voice recording trigger (backup for voice detection)
+        async function startManualRecording() {
+            if (!isConnected || isRecording || isSpeaking) return;
+            
+            console.log('🎤 Manual recording started - speak now!');
+            isRecording = true;
+            setPersonaState('listening', 'Listening...');
+            
+            recordingChunks = [];
+            mediaRecorder.start();
+            
+            // Auto-stop after 10 seconds max
+            setTimeout(() => {
+                if (isRecording) {
+                    console.log('⏰ Auto-stopping recording after 10 seconds');
+                    isRecording = false;
+                    setPersonaState('thinking', 'Processing...');
+                    mediaRecorder.stop();
+                }
+            }, 10000);
+        }
+        
         // Add multiple event listeners for better iPad compatibility
         document.body.addEventListener('click', activateAssistant, { once: true });
         document.body.addEventListener('touchstart', activateAssistant, { once: true });
-        personaOrb.addEventListener('click', activateAssistant);
-        personaOrb.addEventListener('touchstart', activateAssistant);
+        
+        // Orb click handlers - activate first, then manual recording
+        personaOrb.addEventListener('click', (e) => {
+            if (!isActivated) {
+                activateAssistant();
+            } else {
+                startManualRecording();
+            }
+        });
+        
+        personaOrb.addEventListener('touchstart', (e) => {
+            if (!isActivated) {
+                activateAssistant();
+            } else {
+                startManualRecording();
+            }
+        });
+
+        // Keyboard shortcut for testing (spacebar to record)
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && isActivated && !isRecording && !isSpeaking) {
+                e.preventDefault();
+                console.log('⌨️ Spacebar pressed - starting manual recording');
+                startManualRecording();
+            }
+        });
 
         // Initial state - wait for user activation
         setPersonaState('idle', 'TAP TO START');
