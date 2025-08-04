@@ -402,6 +402,25 @@
     </div>
 
     <script>
+        /*
+         * AI Voice Assistant - Enhanced Audio API Implementation
+         * 
+         * This implementation uses a robust dual-mode system:
+         * 1. Primary: OpenAI Realtime API (requires server-side proxy for browser auth)
+         * 2. Fallback: Enhanced Audio API (Whisper + Assistant + TTS) - Currently Active
+         * 
+         * The browser automatically falls back to the enhanced Audio API since 
+         * direct WebSocket connections to OpenAI Realtime API cannot send
+         * the required Authorization headers from browser clients.
+         * 
+         * Features:
+         * - Modern Web Audio API for voice activity detection
+         * - OpenAI Whisper for high-quality speech recognition
+         * - OpenAI Assistant API for intelligent responses
+         * - OpenAI TTS with premium voice for natural speech
+         * - Futuristic cyberpunk visual interface with smooth animations
+         */
+
         const personaOrb = document.getElementById('persona-orb');
         const statusText = document.getElementById('status-text');
         const touchIndicator = document.querySelector('.touch-indicator');
@@ -564,59 +583,72 @@
             }
         }
         
-        // Simple voice activity detection
+        // Modern voice activity detection using Web Audio API
         function setupVoiceActivityDetection() {
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const source = audioContext.createMediaStreamSource(audioStream);
-            const analyser = audioContext.createAnalyser();
-            
-            analyser.fftSize = 256;
-            const bufferLength = analyser.frequencyBinCount;
-            const dataArray = new Uint8Array(bufferLength);
-            
-            source.connect(analyser);
-            
-            let isSpeechDetected = false;
-            const speechThreshold = 30; // Adjust sensitivity
-            const silenceDelay = 1500; // ms
-            
-            function detectVoiceActivity() {
-                analyser.getByteFrequencyData(dataArray);
+            try {
+                // Use existing audioContext if available, or create new one
+                const vadAudioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+                const source = vadAudioContext.createMediaStreamSource(audioStream);
+                const analyser = vadAudioContext.createAnalyser();
                 
-                const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+                // Configure analyser for voice detection
+                analyser.fftSize = 512;
+                analyser.smoothingTimeConstant = 0.3;
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
                 
-                if (average > speechThreshold && !isRecording && !isSpeaking) {
-                    // Speech started
-                    console.log('🎤 Speech detected, starting recording...');
-                    isSpeechDetected = true;
-                    isRecording = true;
-                    setPersonaState('listening', 'Listening...');
+                source.connect(analyser);
+                
+                let isSpeechDetected = false;
+                const speechThreshold = 35; // Adjusted for better sensitivity
+                const silenceDelay = 1200; // ms - slightly shorter for responsiveness
+                
+                function detectVoiceActivity() {
+                    if (!isConnected) return;
                     
-                    recordingChunks = [];
-                    mediaRecorder.start();
+                    analyser.getByteFrequencyData(dataArray);
                     
-                    clearTimeout(silenceTimer);
+                    // Focus on speech frequency range (85Hz - 255Hz is roughly index 4-12 for 512 FFT)
+                    const speechRange = dataArray.slice(4, 32);
+                    const average = speechRange.reduce((a, b) => a + b) / speechRange.length;
                     
-                } else if (average <= speechThreshold && isRecording) {
-                    // Potential silence
-                    clearTimeout(silenceTimer);
-                    silenceTimer = setTimeout(() => {
-                        if (isRecording) {
-                            console.log('🔇 Silence detected, stopping recording...');
-                            isRecording = false;
-                            isSpeechDetected = false;
-                            setPersonaState('thinking', 'Processing...');
-                            mediaRecorder.stop();
-                        }
-                    }, silenceDelay);
+                    if (average > speechThreshold && !isRecording && !isSpeaking) {
+                        // Speech started
+                        console.log('🎤 Speech detected, starting recording...', `(level: ${Math.round(average)})`);
+                        isSpeechDetected = true;
+                        isRecording = true;
+                        setPersonaState('listening', 'Listening...');
+                        
+                        recordingChunks = [];
+                        mediaRecorder.start();
+                        
+                        clearTimeout(silenceTimer);
+                        
+                    } else if (average <= speechThreshold && isRecording) {
+                        // Potential silence
+                        clearTimeout(silenceTimer);
+                        silenceTimer = setTimeout(() => {
+                            if (isRecording) {
+                                console.log('🔇 Silence detected, stopping recording...', `(level: ${Math.round(average)})`);
+                                isRecording = false;
+                                isSpeechDetected = false;
+                                setPersonaState('thinking', 'Processing...');
+                                mediaRecorder.stop();
+                            }
+                        }, silenceDelay);
+                    }
+                    
+                    if (isConnected && !isSpeaking) {
+                        requestAnimationFrame(detectVoiceActivity);
+                    }
                 }
                 
-                if (isConnected && !isSpeaking) {
-                    requestAnimationFrame(detectVoiceActivity);
-                }
+                detectVoiceActivity();
+                console.log('✅ Modern voice activity detection initialized');
+                
+            } catch (error) {
+                console.error('❌ Failed to setup voice activity detection:', error);
             }
-            
-            detectVoiceActivity();
         }
 
         // Process audio input using enhanced Audio API (Whisper + Assistant + TTS)
@@ -851,82 +883,18 @@
             }
         }
 
-        // Handle Realtime API messages (kept for potential future use)
+        // Legacy Realtime API message handler (for future server-side proxy implementation)
         function handleRealtimeMessage(event) {
-            const message = JSON.parse(event.data);
-            console.log('📨 Realtime message:', message.type);
-
-            switch (message.type) {
-                case 'session.created':
-                    console.log('✅ Session created');
-                    break;
-                
-                case 'input_audio_buffer.speech_started':
-                    console.log('🎤 Speech started');
-                    setPersonaState('listening', 'Listening...');
-                    break;
-                
-                case 'input_audio_buffer.speech_stopped':
-                    console.log('🎤 Speech stopped');
-                    setPersonaState('thinking', 'Processing...');
-                    break;
-                
-                case 'response.audio.delta':
-                    if (message.delta) {
-                        playAudioDelta(message.delta);
-                    }
-                    break;
-                
-                case 'response.audio.done':
-                    console.log('🔊 Audio response complete');
-                    setPersonaState('idle', 'Ready');
-                    break;
-                
-                case 'response.done':
-                    console.log('✅ Response complete');
-                    setPersonaState('idle', 'Ready');
-                    break;
-                
-                case 'error':
-                    console.error('❌ Realtime API error:', message.error);
-                    setPersonaState('idle', 'Error occurred');
-                    break;
-            }
+            console.log('📨 Realtime message handler called (legacy)');
+            // This would be used with a server-side proxy for Realtime API
         }
 
-        // Start listening for audio input
+        // Legacy function - Realtime API listening no longer used in browser
+        // Keeping for potential future server-side proxy implementation
         function startRealtimeListening() {
-            if (!isConnected || !audioStream) return;
-            
-            console.log('🎤 Starting realtime listening...');
-            isListening = true;
-            
-            const source = audioContext.createMediaStreamSource(audioStream);
-            const processor = audioContext.createScriptProcessor(4096, 1, 1);
-            
-            processor.onaudioprocess = (event) => {
-                if (!isListening || !isConnected) return;
-                
-                const inputData = event.inputBuffer.getChannelData(0);
-                const outputData = new Int16Array(inputData.length);
-                
-                // Convert float32 to int16
-                for (let i = 0; i < inputData.length; i++) {
-                    outputData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-                }
-                
-                // Send audio to Realtime API
-                if (realtimeSocket && realtimeSocket.readyState === WebSocket.OPEN) {
-                    realtimeSocket.send(JSON.stringify({
-                        type: 'input_audio_buffer.append',
-                        audio: arrayBufferToBase64(outputData.buffer)
-                    }));
-                }
-            };
-            
-            source.connect(processor);
-            processor.connect(audioContext.destination);
-            microphoneSource = { source, processor };
+            console.log('⚠️ startRealtimeListening called but Realtime API requires server-side proxy');
+            console.log('💡 Using enhanced Audio API instead');
+            // No-op since we're using enhanced Audio API fallback
         }
 
         // Play audio response
@@ -1013,73 +981,14 @@
                     return;
                 }
                 
-                // Try to connect to Realtime API with proper authentication
-                // Note: Browser WebSocket connections to OpenAI Realtime API may require
-                // server-side proxy due to CORS and authentication limitations
-                const url = `wss://api.openai.com/v1/realtime?model=${availableModel}`;
-                realtimeSocket = new WebSocket(url);
+                // Browser WebSocket connections to OpenAI Realtime API require server-side proxy
+                // Direct browser connections cannot send Authorization headers
+                console.log('⚠️ Direct browser WebSocket connections to OpenAI Realtime API are not supported');
+                console.log('🔄 Authentication headers cannot be sent from browser WebSocket clients');
+                console.log('💡 Would require server-side proxy for proper authentication');
                 
-                // Browser WebSocket API doesn't support custom headers
-                // Authentication would need to be handled server-side or via proxy
-                
-                realtimeSocket.onopen = () => {
-                    console.log('✅ Realtime WebSocket connected');
-                    
-                    // First, authenticate the session
-                    realtimeSocket.send(JSON.stringify({
-                        type: 'session.update',
-                        session: {
-                            modalities: ['text', 'audio'],
-                            instructions: 'You are a helpful voice assistant with natural conversation abilities. Keep responses conversational, concise, and appropriate for a home assistant context. You are interacting through voice, so respond naturally as if speaking to someone.',
-                            voice: 'nova', // Using the same high-quality voice as TTS
-                            input_audio_format: 'pcm16',
-                            output_audio_format: 'pcm16',
-                            input_audio_transcription: {
-                                model: 'whisper-1'
-                            },
-                            turn_detection: {
-                                type: 'server_vad',
-                                threshold: 0.5,
-                                prefix_padding_ms: 300,
-                                silence_duration_ms: 500
-                            },
-                            temperature: 0.8,
-                            max_response_output_tokens: 4096
-                        }
-                    }));
-                    
-                    setPersonaState('idle', 'Ready');
-                    isConnected = true;
-                    startRealtimeListening();
-                };
-                
-                realtimeSocket.onmessage = handleRealtimeMessage;
-                
-                realtimeSocket.onerror = (error) => {
-                    console.error('❌ Realtime WebSocket error:', error);
-                    realtimeSocket = null;
-                    console.log('🔄 Falling back to enhanced Audio API');
-                    connectEnhancedAudio();
-                };
-                
-                realtimeSocket.onclose = (event) => {
-                    console.log('🔌 Realtime WebSocket closed:', event.code, event.reason);
-                    if (isConnected) {
-                        console.log('🔄 Connection lost, falling back to enhanced Audio API');
-                        isConnected = false;
-                        connectEnhancedAudio();
-                    }
-                };
-                
-                // Timeout fallback
-                setTimeout(() => {
-                    if (realtimeSocket && realtimeSocket.readyState === WebSocket.CONNECTING) {
-                        console.log('⏰ Realtime connection timeout, falling back to enhanced Audio API');
-                        realtimeSocket.close();
-                        realtimeSocket = null;
-                        connectEnhancedAudio();
-                    }
-                }, 10000); // 10 second timeout
+                // Skip direct WebSocket connection and use fallback immediately
+                throw new Error('Browser WebSocket authentication not supported');
                 
             } catch (error) {
                 console.error('❌ Realtime connection failed:', error);
