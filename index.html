@@ -211,8 +211,13 @@
             }
         }
 
-        // Initialize speech recognition on page load
+        // Initialize speech recognition and load voices on page load
         initializeSpeechRecognition();
+        
+        // Pre-load voices for faster TTS
+        loadVoices().then(() => {
+            console.log('Voices loaded:', voicesCache.length);
+        });
 
         // --- New TTS Functions ---
         function base64ToArrayBuffer(base64) {
@@ -279,32 +284,84 @@
             return 'en-US'; // Default to English
         }
 
-        // Get best voice for language
+        // Cache for loaded voices
+        let voicesCache = [];
+        let voicesLoaded = false;
+        
+        // Pre-load and cache voices
+        function loadVoices() {
+            return new Promise((resolve) => {
+                const voices = speechSynthesis.getVoices();
+                if (voices.length > 0) {
+                    voicesCache = voices;
+                    voicesLoaded = true;
+                    resolve(voices);
+                } else {
+                    speechSynthesis.addEventListener('voiceschanged', () => {
+                        voicesCache = speechSynthesis.getVoices();
+                        voicesLoaded = true;
+                        resolve(voicesCache);
+                    }, { once: true });
+                }
+            });
+        }
+
+        // Get best quality voice for language
         function getBestVoice(language) {
-            const voices = speechSynthesis.getVoices();
+            const voices = voicesLoaded ? voicesCache : speechSynthesis.getVoices();
             
-            // Voice preferences for each language
+            // Enhanced voice preferences prioritizing natural-sounding voices
             const voicePreferences = {
-                'en-US': ['Google US English', 'Microsoft Zira', 'Alex', 'Samantha', 'Karen', 'Moira'],
-                'hi-IN': ['Google हिन्दी', 'Microsoft Hemant', 'Lekha', 'Google Hindi'],
-                'fr-FR': ['Google français', 'Microsoft Hortense', 'Thomas', 'Amelie'],
-                'mr-IN': ['Google हिन्दी', 'Microsoft Hemant'] // Fallback to Hindi voices for Marathi
+                'en-US': [
+                    // Neural/Premium voices first
+                    'Google US English', 'Microsoft Aria Online', 'Microsoft Jenny Online',
+                    'Samantha', 'Alex', 'Victoria', 'Karen', 'Moira',
+                    // Fallback to any US English
+                    'Microsoft Zira', 'Microsoft David'
+                ],
+                'hi-IN': [
+                    'Google हिन्दी', 'Microsoft Hemant Online', 'Microsoft Kalpana Online',
+                    'Lekha', 'Google Hindi', 'Microsoft Hemant'
+                ],
+                'fr-FR': [
+                    'Google français', 'Microsoft Denise Online', 'Microsoft Eloise Online',
+                    'Thomas', 'Amelie', 'Microsoft Hortense'
+                ],
+                'mr-IN': [
+                    'Google हिन्दी', 'Microsoft Hemant Online', 'Microsoft Hemant'
+                ]
             };
             
             const preferences = voicePreferences[language] || voicePreferences['en-US'];
             
-            // Try to find preferred voices first
+            // First pass: exact name matches (premium voices)
             for (const prefName of preferences) {
-                const voice = voices.find(v => v.name.includes(prefName));
+                const voice = voices.find(v => v.name === prefName);
                 if (voice) return voice;
             }
             
-            // Fallback to any voice matching the language
-            const langVoice = voices.find(v => v.lang === language);
-            if (langVoice) return langVoice;
+            // Second pass: partial matches
+            for (const prefName of preferences) {
+                const voice = voices.find(v => v.name.includes(prefName.split(' ')[0]));
+                if (voice) return voice;
+            }
             
-            // Final fallback to English
-            return voices.find(v => v.lang.startsWith('en')) || voices[0];
+            // Third pass: language match with quality filter
+            const langVoices = voices.filter(v => v.lang === language);
+            if (langVoices.length > 0) {
+                // Prefer voices with "Google" or "Microsoft" for better quality
+                const qualityVoice = langVoices.find(v => 
+                    v.name.includes('Google') || v.name.includes('Microsoft')
+                );
+                if (qualityVoice) return qualityVoice;
+                return langVoices[0];
+            }
+            
+            // Final fallback to best English voice
+            const englishVoice = voices.find(v => 
+                v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Samantha'))
+            );
+            return englishVoice || voices[0];
         }
 
         async function speak(text) {
@@ -319,9 +376,17 @@
             setPersonaState('speaking', '...');
             
             try {
-                // Try using browser's built-in speech synthesis as fallback
+                // Ensure voices are loaded first (reduces latency)
+                if (!voicesLoaded) {
+                    await loadVoices();
+                }
+                
+                // Try using browser's built-in speech synthesis
                 if ('speechSynthesis' in window) {
-                    const utterance = new SpeechSynthesisUtterance(text);
+                    // Cancel any ongoing speech to reduce latency
+                    speechSynthesis.cancel();
+                    
+                    const utterance = new SpeechSynthesisUtterance();
                     
                     // Detect language and set appropriate voice
                     const detectedLang = detectLanguage(text);
@@ -334,44 +399,40 @@
                         utterance.lang = detectedLang;
                     }
                     
-                    // Optimize settings for natural speech
-                    utterance.rate = 0.85; // Slightly slower for clarity
-                    utterance.pitch = 1.0;
-                    utterance.volume = 0.9;
+                    // Optimized settings for natural, human-like speech
+                    utterance.rate = 0.95; // Slightly faster, more natural
+                    utterance.pitch = 0.95; // Slightly lower pitch for warmth
+                    utterance.volume = 1.0;
                     
-                    // Add pauses for better flow
+                    // Minimal text processing to reduce robotic feeling
                     const processedText = text
-                        .replace(/\./g, '. ') // Add pause after periods
-                        .replace(/,/g, ', ') // Add pause after commas
-                        .replace(/\?/g, '? ') // Add pause after questions
-                        .replace(/!/g, '! ') // Add pause after exclamations
-                        .replace(/:/g, ': ') // Add pause after colons
                         .replace(/\s+/g, ' ') // Clean up multiple spaces
                         .trim();
                     
                     utterance.text = processedText;
                     
-                    utterance.onend = () => {
-                        isSpeaking = false;
-                        setPersonaState('idle', 'Ready');
-                        startListening();
-                    };
-                    
-                    utterance.onerror = () => {
-                        isSpeaking = false;
-                        setPersonaState('idle', 'Speech Error');
-                        startListening();
-                    };
-                    
-                    // Ensure voices are loaded before speaking
-                    if (speechSynthesis.getVoices().length === 0) {
-                        speechSynthesis.addEventListener('voiceschanged', () => {
-                            speechSynthesis.speak(utterance);
-                        }, { once: true });
-                    } else {
+                    // Promise-based approach for better error handling
+                    const speakPromise = new Promise((resolve, reject) => {
+                        utterance.onend = () => {
+                            isSpeaking = false;
+                            setPersonaState('idle', 'Ready');
+                            startListening();
+                            resolve();
+                        };
+                        
+                        utterance.onerror = (event) => {
+                            console.error('Speech synthesis error:', event.error);
+                            isSpeaking = false;
+                            setPersonaState('idle', 'Speech Error');
+                            startListening();
+                            reject(event.error);
+                        };
+                        
+                        // Immediate speech synthesis for reduced latency
                         speechSynthesis.speak(utterance);
-                    }
-                    return;
+                    });
+                    
+                    return speakPromise;
                 }
                 
                 // Fallback: If no TTS available, just continue
