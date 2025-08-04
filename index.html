@@ -385,83 +385,380 @@
             }
         }
 
-        // Connect to OpenAI Realtime API
-        async function connectRealtime() {
+        // Enhanced Audio API fallback (Whisper + Assistant + TTS)
+        async function connectEnhancedAudio() {
             try {
-                // Test access first and get the available model
-                const availableModel = await testRealtimeAccess();
-                if (!availableModel) {
-                    setPersonaState('idle', 'REALTIME API ACCESS REQUIRED');
-                    console.error('❌ Realtime API access not available. Please request access from OpenAI.');
-                    return;
-                }
+                console.log('🔄 Realtime API unavailable, using enhanced Audio API fallback');
+                setPersonaState('idle', 'INITIALIZING AUDIO...');
                 
-                console.log('🔌 Connecting to OpenAI Realtime API with model:', availableModel);
+                // Create thread for Assistant API
+                await createThread();
                 
-                // Use proper WebSocket URL format with bearer token in subprotocol
-                const url = `wss://api.openai.com/v1/realtime?model=${availableModel}`;
-                realtimeSocket = new WebSocket(url, [
-                    'realtime', 
-                    `bearer.${apiKey}`,
-                    'openai-beta.realtime-v1'
-                ]);
-
-                realtimeSocket.onopen = () => {
-                    console.log('✅ Connected to Realtime API');
-                    isConnected = true;
-                    
-                    // Send session configuration
-                    realtimeSocket.send(JSON.stringify({
-                        type: 'session.update',
-                        session: {
-                            modalities: ['text', 'audio'],
-                            instructions: `You're Shubham's personal assistant operating through his voice-activated iPad home assistant interface. Be conversational, natural, and keep responses concise for voice interaction.`,
-                            voice: 'alloy',
-                            input_audio_format: 'pcm16',
-                            output_audio_format: 'pcm16',
-                            input_audio_transcription: {
-                                model: 'whisper-1'
-                            },
-                            turn_detection: {
-                                type: 'server_vad',
-                                threshold: 0.5,
-                                prefix_padding_ms: 300,
-                                silence_duration_ms: 500
-                            }
-                        }
-                    }));
-                    
-                    setPersonaState('idle', 'Ready');
-                    startRealtimeListening();
-                };
-
-                realtimeSocket.onmessage = handleRealtimeMessage;
+                // Start voice activity detection
+                startVoiceRecording();
                 
-                realtimeSocket.onclose = () => {
-                    console.log('🔌 Realtime connection closed');
-                    isConnected = false;
-                    setPersonaState('idle', 'Disconnected');
-                    // Attempt reconnection
-                    setTimeout(connectRealtime, 3000);
-                };
-
-                realtimeSocket.onerror = (error) => {
-                    console.error('❌ Realtime connection error:', error);
-                    console.error('WebSocket error details:', {
-                        url: url,
-                        readyState: realtimeSocket?.readyState,
-                        protocol: realtimeSocket?.protocol
-                    });
-                    setPersonaState('idle', 'Connection error');
-                };
-
+                setPersonaState('idle', 'Ready');
+                isConnected = true;
+                
             } catch (error) {
-                console.error('❌ Failed to connect to Realtime API:', error);
-                setPersonaState('idle', 'Connection failed');
+                console.error('❌ Failed to initialize enhanced audio:', error);
+                setPersonaState('idle', 'Initialization failed');
             }
         }
 
-        // Handle Realtime API messages
+        // Create thread for Assistant API
+        async function createThread() {
+            try {
+                console.log('📝 Creating thread for assistant...');
+                const response = await fetch('https://api.openai.com/v1/threads', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                        'OpenAI-Beta': 'assistants=v2'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to create thread: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                window.threadId = data.id;
+                console.log('✅ Thread created:', window.threadId);
+                
+            } catch (error) {
+                console.error('❌ Thread creation failed:', error);
+                throw error;
+            }
+        }
+
+        // Start voice recording with activity detection
+        let mediaRecorder = null;
+        let recordingChunks = [];
+        let isRecording = false;
+        let silenceTimer = null;
+        
+        function startVoiceRecording() {
+            if (!audioStream) return;
+            
+            try {
+                mediaRecorder = new MediaRecorder(audioStream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordingChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    if (recordingChunks.length > 0) {
+                        const audioBlob = new Blob(recordingChunks, { type: 'audio/webm' });
+                        recordingChunks = [];
+                        await processAudioInput(audioBlob);
+                    }
+                };
+                
+                // Start continuous recording with voice activity detection
+                setupVoiceActivityDetection();
+                
+                console.log('✅ Voice recording initialized');
+                
+            } catch (error) {
+                console.error('❌ Failed to setup voice recording:', error);
+            }
+        }
+        
+        // Simple voice activity detection
+        function setupVoiceActivityDetection() {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(audioStream);
+            const analyser = audioContext.createAnalyser();
+            
+            analyser.fftSize = 256;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            source.connect(analyser);
+            
+            let isSpeechDetected = false;
+            const speechThreshold = 30; // Adjust sensitivity
+            const silenceDelay = 1500; // ms
+            
+            function detectVoiceActivity() {
+                analyser.getByteFrequencyData(dataArray);
+                
+                const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+                
+                if (average > speechThreshold && !isRecording && !isSpeaking) {
+                    // Speech started
+                    console.log('🎤 Speech detected, starting recording...');
+                    isSpeechDetected = true;
+                    isRecording = true;
+                    setPersonaState('listening', 'Listening...');
+                    
+                    recordingChunks = [];
+                    mediaRecorder.start();
+                    
+                    clearTimeout(silenceTimer);
+                    
+                } else if (average <= speechThreshold && isRecording) {
+                    // Potential silence
+                    clearTimeout(silenceTimer);
+                    silenceTimer = setTimeout(() => {
+                        if (isRecording) {
+                            console.log('🔇 Silence detected, stopping recording...');
+                            isRecording = false;
+                            isSpeechDetected = false;
+                            setPersonaState('thinking', 'Processing...');
+                            mediaRecorder.stop();
+                        }
+                    }, silenceDelay);
+                }
+                
+                if (isConnected && !isSpeaking) {
+                    requestAnimationFrame(detectVoiceActivity);
+                }
+            }
+            
+            detectVoiceActivity();
+        }
+
+        // Process audio input using enhanced Audio API (Whisper + Assistant + TTS)
+        async function processAudioInput(audioBlob) {
+            try {
+                console.log('🎵 Processing audio input via enhanced API...');
+                
+                // Step 1: Convert audio to text using Whisper
+                const transcription = await transcribeAudio(audioBlob);
+                if (!transcription) {
+                    console.error('❌ No transcription received');
+                    setPersonaState('idle', 'Ready');
+                    return;
+                }
+                
+                console.log('📝 Transcription:', transcription);
+                
+                // Step 2: Send to Assistant API
+                const response = await sendToAssistant(transcription);
+                if (!response) {
+                    console.error('❌ No response from assistant');
+                    setPersonaState('idle', 'Ready');
+                    return;
+                }
+                
+                console.log('💭 Assistant response:', response);
+                
+                // Step 3: Convert response to speech using OpenAI TTS
+                await speakResponse(response);
+                
+            } catch (error) {
+                console.error('❌ Error processing audio input:', error);
+                setPersonaState('idle', 'Error occurred');
+            }
+        }
+
+        // Transcribe audio using OpenAI Whisper
+        async function transcribeAudio(audioBlob) {
+            try {
+                console.log('🎤 Transcribing audio...');
+                
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'audio.webm');
+                formData.append('model', 'whisper-1');
+                formData.append('language', 'en'); // Support for multilingual can be added later
+                
+                const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Whisper API error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                return data.text;
+                
+            } catch (error) {
+                console.error('❌ Transcription failed:', error);
+                return null;
+            }
+        }
+
+        // Send message to Assistant API
+        async function sendToAssistant(message) {
+            try {
+                console.log('🤖 Sending to assistant...');
+                
+                // Add message to thread
+                const messageResponse = await fetch(`https://api.openai.com/v1/threads/${window.threadId}/messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                        'OpenAI-Beta': 'assistants=v2'
+                    },
+                    body: JSON.stringify({
+                        role: 'user',
+                        content: message
+                    })
+                });
+                
+                if (!messageResponse.ok) {
+                    throw new Error(`Failed to add message: ${messageResponse.status}`);
+                }
+                
+                // Run the assistant
+                const runResponse = await fetch(`https://api.openai.com/v1/threads/${window.threadId}/runs`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                        'OpenAI-Beta': 'assistants=v2'
+                    },
+                    body: JSON.stringify({
+                        assistant_id: assistantId
+                    })
+                });
+                
+                if (!runResponse.ok) {
+                    throw new Error(`Failed to start run: ${runResponse.status}`);
+                }
+                
+                const runData = await runResponse.json();
+                
+                // Poll for completion
+                const result = await pollRunCompletion(runData.id);
+                return result;
+                
+            } catch (error) {
+                console.error('❌ Assistant API failed:', error);
+                return null;
+            }
+        }
+
+        // Poll for run completion
+        async function pollRunCompletion(runId) {
+            const maxAttempts = 30;
+            let attempts = 0;
+            
+            while (attempts < maxAttempts) {
+                try {
+                    const response = await fetch(`https://api.openai.com/v1/threads/${window.threadId}/runs/${runId}`, {
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'Content-Type': 'application/json',
+                            'OpenAI-Beta': 'assistants=v2'
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Failed to check run status: ${response.status}`);
+                    }
+                    
+                    const runData = await response.json();
+                    
+                    if (runData.status === 'completed') {
+                        // Get the latest message
+                        const messagesResponse = await fetch(`https://api.openai.com/v1/threads/${window.threadId}/messages`, {
+                            headers: {
+                                'Authorization': `Bearer ${apiKey}`,
+                                'Content-Type': 'application/json',
+                                'OpenAI-Beta': 'assistants=v2'
+                            }
+                        });
+                        
+                        if (messagesResponse.ok) {
+                            const messagesData = await messagesResponse.json();
+                            const latestMessage = messagesData.data[0];
+                            if (latestMessage.role === 'assistant') {
+                                return latestMessage.content[0].text.value;
+                            }
+                        }
+                        return null;
+                        
+                    } else if (runData.status === 'failed' || runData.status === 'cancelled') {
+                        console.error('❌ Run failed or cancelled:', runData.status);
+                        return null;
+                    }
+                    
+                    // Wait before next poll
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    attempts++;
+                    
+                } catch (error) {
+                    console.error('❌ Error polling run:', error);
+                    return null;
+                }
+            }
+            
+            console.error('❌ Run polling timed out');
+            return null;
+        }
+
+        // Convert text to speech using OpenAI TTS
+        async function speakResponse(text) {
+            try {
+                console.log('🔊 Converting to speech...');
+                setPersonaState('speaking', 'Speaking...');
+                
+                const response = await fetch('https://api.openai.com/v1/audio/speech', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'tts-1',
+                        input: text,
+                        voice: 'nova', // High-quality voice
+                        response_format: 'mp3'
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`TTS API error: ${response.status}`);
+                }
+                
+                const audioBuffer = await response.arrayBuffer();
+                const audioBlob = new Blob([audioBuffer], { type: 'audio/mp3' });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                
+                const audio = new Audio(audioUrl);
+                audio.onplay = () => {
+                    console.log('🔊 Starting audio playback');
+                    isSpeaking = true;
+                };
+                
+                audio.onended = () => {
+                    console.log('✅ Audio playback complete');
+                    isSpeaking = false;
+                    setPersonaState('idle', 'Ready');
+                    URL.revokeObjectURL(audioUrl);
+                };
+                
+                audio.onerror = (error) => {
+                    console.error('❌ Audio playback error:', error);
+                    isSpeaking = false;
+                    setPersonaState('idle', 'Ready');
+                    URL.revokeObjectURL(audioUrl);
+                };
+                
+                await audio.play();
+                
+            } catch (error) {
+                console.error('❌ TTS failed:', error);
+                setPersonaState('idle', 'TTS Error');
+            }
+        }
+
+        // Handle Realtime API messages (kept for potential future use)
         function handleRealtimeMessage(event) {
             const message = JSON.parse(event.data);
             console.log('📨 Realtime message:', message.type);
@@ -609,6 +906,84 @@
 
 
 
+        // Connect to Realtime API (with fallback to enhanced Audio API)
+        async function connectRealtime() {
+            try {
+                console.log('🔄 Attempting Realtime API connection...');
+                setPersonaState('idle', 'CONNECTING...');
+                
+                // Test Realtime API access
+                const availableModel = await testRealtimeAccess();
+                if (!availableModel) {
+                    console.log('⚠️ Realtime API not available, falling back to enhanced Audio API');
+                    await connectEnhancedAudio();
+                    return;
+                }
+                
+                // Try to connect to Realtime API
+                const url = `wss://api.openai.com/v1/realtime?model=${availableModel}`;
+                realtimeSocket = new WebSocket(url, [
+                    'realtime', 
+                    `bearer.${apiKey}`,
+                    'openai-beta.realtime-v1'
+                ]);
+                
+                realtimeSocket.onopen = () => {
+                    console.log('✅ Realtime WebSocket connected');
+                    realtimeSocket.send(JSON.stringify({
+                        type: 'session.update',
+                        session: {
+                            modalities: ['text', 'audio'],
+                            instructions: 'You are a helpful voice assistant. Keep responses conversational and concise.',
+                            voice: 'alloy',
+                            input_audio_format: 'pcm16',
+                            output_audio_format: 'pcm16',
+                            input_audio_transcription: {
+                                model: 'whisper-1'
+                            }
+                        }
+                    }));
+                    
+                    setPersonaState('idle', 'Ready');
+                    isConnected = true;
+                    startRealtimeListening();
+                };
+                
+                realtimeSocket.onmessage = handleRealtimeMessage;
+                
+                realtimeSocket.onerror = (error) => {
+                    console.error('❌ Realtime WebSocket error:', error);
+                    realtimeSocket = null;
+                    console.log('🔄 Falling back to enhanced Audio API');
+                    connectEnhancedAudio();
+                };
+                
+                realtimeSocket.onclose = (event) => {
+                    console.log('🔌 Realtime WebSocket closed:', event.code, event.reason);
+                    if (isConnected) {
+                        console.log('🔄 Connection lost, falling back to enhanced Audio API');
+                        isConnected = false;
+                        connectEnhancedAudio();
+                    }
+                };
+                
+                // Timeout fallback
+                setTimeout(() => {
+                    if (realtimeSocket && realtimeSocket.readyState === WebSocket.CONNECTING) {
+                        console.log('⏰ Realtime connection timeout, falling back to enhanced Audio API');
+                        realtimeSocket.close();
+                        realtimeSocket = null;
+                        connectEnhancedAudio();
+                    }
+                }, 10000); // 10 second timeout
+                
+            } catch (error) {
+                console.error('❌ Realtime connection failed:', error);
+                console.log('🔄 Falling back to enhanced Audio API');
+                await connectEnhancedAudio();
+            }
+        }
+
         // Enhanced touch/click interaction for iPad with Realtime API
         let isActivated = false;
         
@@ -620,7 +995,7 @@
                 
                 setPersonaState('idle', 'INITIALIZING...');
                 
-                // Initialize audio and connect to Realtime API
+                // Initialize audio and connect to voice system
                 const audioInitialized = await initializeAudio();
                 if (audioInitialized) {
                     await connectRealtime();
