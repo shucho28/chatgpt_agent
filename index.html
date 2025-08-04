@@ -398,9 +398,13 @@
                 
                 console.log('🔌 Connecting to OpenAI Realtime API with model:', availableModel);
                 
-                // Use the detected realtime model
+                // Use proper WebSocket URL format with bearer token in subprotocol
                 const url = `wss://api.openai.com/v1/realtime?model=${availableModel}`;
-                realtimeSocket = new WebSocket(url, [`bearer-${apiKey}`, 'realtime-v1']);
+                realtimeSocket = new WebSocket(url, [
+                    'realtime', 
+                    `bearer.${apiKey}`,
+                    'openai-beta.realtime-v1'
+                ]);
 
                 realtimeSocket.onopen = () => {
                     console.log('✅ Connected to Realtime API');
@@ -443,6 +447,11 @@
 
                 realtimeSocket.onerror = (error) => {
                     console.error('❌ Realtime connection error:', error);
+                    console.error('WebSocket error details:', {
+                        url: url,
+                        readyState: realtimeSocket?.readyState,
+                        protocol: realtimeSocket?.protocol
+                    });
                     setPersonaState('idle', 'Connection error');
                 };
 
