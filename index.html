@@ -6,93 +6,312 @@
     <title>AI Persona</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Exo+2:wght@300;400;500;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         
         body {
-            font-family: 'Inter', sans-serif;
-            overflow: hidden; /* Prevent scrolling */
-        }
-
-        /* --- Orb Styles & Animations --- */
-        .orb {
-            width: 250px; /* Made the orb a bit bigger */
-            height: 250px;
-            border-radius: 50%;
+            font-family: 'Exo 2', sans-serif;
+            overflow: hidden;
+            background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 25%, #16213e 50%, #0f3460 75%, #533a7b 100%);
             position: relative;
-            background: radial-gradient(circle, #5a67d8 0%, #3c366b 100%);
-            box-shadow: 0 0 20px #5a67d8, 0 0 40px #5a67d8, 0 0 60px #c4b5fd;
-            transition: all 0.5s ease-in-out;
-        }
-
-        /* IDLE state animation */
-        @keyframes idlePulse {
-            0%, 100% { transform: scale(1); box-shadow: 0 0 20px #5a67d8, 0 0 40px #5a67d8, 0 0 60px #c4b5fd; }
-            50% { transform: scale(1.05); box-shadow: 0 0 25px #6a7ae9, 0 0 50px #6a7ae9, 0 0 75px #d8cffc; }
-        }
-        .orb.idle {
-            animation: idlePulse 4s infinite ease-in-out;
-            background: radial-gradient(circle, #4a55b8 0%, #2c265b 100%);
+            width: 100vw;
+            height: 100vh;
         }
         
-        /* LISTENING state */
-        .orb.listening {
-            transform: scale(1.1);
-            background: radial-gradient(circle, #6a7ae9 0%, #4c468b 100%);
+        /* Animated background particles */
+        .bg-particles {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: 1;
+        }
+        
+        .particle {
+            position: absolute;
+            background: radial-gradient(circle, rgba(0, 255, 255, 0.8), rgba(255, 0, 255, 0.4));
+            border-radius: 50%;
+            animation: float 8s infinite ease-in-out;
+        }
+        
+        .particle:nth-child(1) { width: 4px; height: 4px; top: 20%; left: 10%; animation-delay: 0s; }
+        .particle:nth-child(2) { width: 6px; height: 6px; top: 80%; left: 20%; animation-delay: 1s; }
+        .particle:nth-child(3) { width: 3px; height: 3px; top: 40%; left: 80%; animation-delay: 2s; }
+        .particle:nth-child(4) { width: 5px; height: 5px; top: 60%; left: 90%; animation-delay: 3s; }
+        .particle:nth-child(5) { width: 4px; height: 4px; top: 10%; left: 60%; animation-delay: 4s; }
+        .particle:nth-child(6) { width: 7px; height: 7px; top: 90%; left: 70%; animation-delay: 5s; }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); opacity: 1; }
+            25% { transform: translateY(-20px) rotate(90deg); opacity: 0.8; }
+            50% { transform: translateY(-10px) rotate(180deg); opacity: 0.6; }
+            75% { transform: translateY(-30px) rotate(270deg); opacity: 0.8; }
+        }
+        
+        /* Animated grid overlay */
+        .grid-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(0, 255, 255, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+            z-index: 2;
+            animation: gridPulse 4s ease-in-out infinite;
+        }
+        
+        @keyframes gridPulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.1; }
         }
 
-        /* THINKING state animation */
-        @keyframes thinkingSpin {
+        /* --- Enhanced Futuristic Orb --- */
+        .orb-container {
+            position: relative;
+            z-index: 10;
+        }
+        
+        .orb {
+            width: 320px;
+            height: 320px;
+            border-radius: 50%;
+            position: relative;
+            background: radial-gradient(circle at 30% 30%, #00ffff 0%, #ff00ff 30%, #8b5cf6 60%, #1e40af 100%);
+            box-shadow: 
+                0 0 50px rgba(0, 255, 255, 0.6),
+                0 0 80px rgba(255, 0, 255, 0.4),
+                0 0 120px rgba(139, 92, 246, 0.3),
+                inset 0 0 50px rgba(255, 255, 255, 0.1);
+            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 2px solid rgba(0, 255, 255, 0.3);
+        }
+        
+        .orb::before {
+            content: '';
+            position: absolute;
+            top: -5px;
+            left: -5px;
+            right: -5px;
+            bottom: -5px;
+            border-radius: 50%;
+            background: conic-gradient(from 0deg, transparent, rgba(0, 255, 255, 0.4), transparent, rgba(255, 0, 255, 0.4), transparent);
+            animation: orbRotate 8s linear infinite;
+            z-index: -1;
+        }
+        
+        .orb::after {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.8) 0%, transparent 70%);
+            filter: blur(20px);
+        }
+        
+        @keyframes orbRotate {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
-        .orb.thinking::before {
-            content: '';
-            position: absolute;
-            top: -10px;
-            left: -10px;
-            width: 270px;
-            height: 270px;
-            border-radius: 50%;
-            border: 4px solid transparent;
-            border-top-color: #a78bfa;
-            border-bottom-color: #a78bfa;
-            animation: thinkingSpin 1.5s linear infinite;
+
+        /* IDLE state - gentle breathing */
+        @keyframes idleBreath {
+            0%, 100% { 
+                transform: scale(1);
+                box-shadow: 
+                    0 0 50px rgba(0, 255, 255, 0.6),
+                    0 0 80px rgba(255, 0, 255, 0.4),
+                    0 0 120px rgba(139, 92, 246, 0.3);
+            }
+            50% { 
+                transform: scale(1.05);
+                box-shadow: 
+                    0 0 60px rgba(0, 255, 255, 0.8),
+                    0 0 100px rgba(255, 0, 255, 0.6),
+                    0 0 140px rgba(139, 92, 246, 0.4);
+            }
         }
-        .orb.thinking {
-            transform: scale(0.95);
+        .orb.idle {
+            animation: idleBreath 6s infinite ease-in-out;
+            background: radial-gradient(circle at 30% 30%, #00ccff 0%, #cc00ff 30%, #6d28d9 60%, #1e3a8a 100%);
+        }
+        
+        /* LISTENING state - active pulsing */
+        @keyframes listeningPulse {
+            0%, 100% { 
+                transform: scale(1.1);
+                box-shadow: 
+                    0 0 70px rgba(0, 255, 255, 1),
+                    0 0 100px rgba(255, 0, 255, 0.8),
+                    0 0 150px rgba(139, 92, 246, 0.6);
+            }
+            50% { 
+                transform: scale(1.2);
+                box-shadow: 
+                    0 0 90px rgba(0, 255, 255, 1),
+                    0 0 120px rgba(255, 0, 255, 0.9),
+                    0 0 180px rgba(139, 92, 246, 0.7);
+            }
+        }
+        .orb.listening {
+            animation: listeningPulse 1s infinite ease-in-out;
+            background: radial-gradient(circle at 30% 30%, #00ffff 0%, #ff00ff 40%, #8b5cf6 70%, #3b82f6 100%);
         }
 
-        /* SPEAKING state animation */
-        @keyframes speakingGlow {
-            0%, 100% { box-shadow: 0 0 20px #8b5cf6, 0 0 40px #8b5cf6, 0 0 60px #ddd6fe; transform: scale(1.02); }
-            50% { box-shadow: 0 0 30px #a78bfa, 0 0 60px #a78bfa, 0 0 90px #ede9fe; transform: scale(1.05); }
+        /* THINKING state - spinning energy rings */
+        @keyframes thinkingRings {
+            from { transform: rotate(0deg) scale(0.9); }
+            to { transform: rotate(360deg) scale(0.9); }
+        }
+        .orb.thinking::before {
+            animation: thinkingRings 2s linear infinite;
+            background: conic-gradient(from 0deg, 
+                transparent, 
+                rgba(0, 255, 255, 0.8), 
+                transparent, 
+                rgba(255, 0, 255, 0.8), 
+                transparent);
+        }
+        .orb.thinking {
+            background: radial-gradient(circle at 50% 50%, #ff00ff 0%, #00ffff 50%, #8b5cf6 100%);
+            box-shadow: 
+                0 0 80px rgba(255, 0, 255, 0.8),
+                0 0 120px rgba(0, 255, 255, 0.6),
+                0 0 160px rgba(139, 92, 246, 0.4);
+        }
+
+        /* SPEAKING state - dynamic waves */
+        @keyframes speakingWaves {
+            0%, 100% { 
+                transform: scale(1.05);
+                box-shadow: 
+                    0 0 60px rgba(255, 255, 0, 0.8),
+                    0 0 100px rgba(255, 0, 255, 0.6),
+                    0 0 140px rgba(0, 255, 255, 0.4);
+            }
+            25% { 
+                transform: scale(1.15);
+                box-shadow: 
+                    0 0 80px rgba(255, 255, 0, 1),
+                    0 0 120px rgba(255, 0, 255, 0.8),
+                    0 0 160px rgba(0, 255, 255, 0.6);
+            }
+            50% { 
+                transform: scale(1.1);
+                box-shadow: 
+                    0 0 70px rgba(255, 255, 0, 0.9),
+                    0 0 110px rgba(255, 0, 255, 0.7),
+                    0 0 150px rgba(0, 255, 255, 0.5);
+            }
+            75% { 
+                transform: scale(1.2);
+                box-shadow: 
+                    0 0 90px rgba(255, 255, 0, 1),
+                    0 0 130px rgba(255, 0, 255, 0.8),
+                    0 0 170px rgba(0, 255, 255, 0.6);
+            }
         }
         .orb.speaking {
-            animation: speakingGlow 1.2s infinite ease-in-out;
+            animation: speakingWaves 0.8s infinite ease-in-out;
+            background: radial-gradient(circle at 30% 30%, #ffff00 0%, #ff00ff 30%, #00ffff 60%, #8b5cf6 100%);
         }
+        
+        /* Futuristic status text */
         .status-text {
             position: absolute;
-            bottom: -50px;
+            bottom: -80px;
             width: 100%;
             text-align: center;
-            font-size: 1.1rem;
-            color: #a0aec0;
-            transition: opacity 0.3s ease-in-out;
+            font-family: 'Orbitron', monospace;
+            font-size: 1.3rem;
+            font-weight: 500;
+            color: transparent;
+            background: linear-gradient(45deg, #00ffff, #ff00ff, #ffff00);
+            background-clip: text;
+            -webkit-background-clip: text;
+            text-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+            transition: all 0.3s ease-in-out;
+            letter-spacing: 2px;
+        }
+        /* iPad optimizations */
+        @media screen and (min-width: 768px) {
+            .orb {
+                width: 400px;
+                height: 400px;
+            }
+            .status-text {
+                font-size: 1.5rem;
+                bottom: -100px;
+            }
+        }
+        
+        /* Touch feedback */
+        .touch-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-family: 'Orbitron', monospace;
+            font-size: 0.9rem;
+            color: rgba(0, 255, 255, 0.7);
+            z-index: 20;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+        }
+        
+        /* Pulse animation for user interaction hint */
+        @keyframes pulseHint {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+        
+        .pulse-hint {
+            animation: pulseHint 2s infinite ease-in-out;
         }
     </style>
 </head>
-<body class="bg-gray-900 text-white flex flex-col items-center justify-center h-screen">
-
+<body>
+    <!-- Animated Background -->
+    <div class="bg-particles">
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+    </div>
     
-    <div class="relative flex items-center justify-center">
-        <!-- Persona Orb -->
-        <div id="persona-orb" class="orb idle"></div>
-        <div id="status-text" class="status-text">Initializing...</div>
+    <!-- Grid Overlay -->
+    <div class="grid-overlay"></div>
+    
+    <!-- Touch Indicator -->
+    <div class="touch-indicator pulse-hint">
+        TAP TO ACTIVATE
+    </div>
+    
+    <!-- Main Assistant Interface -->
+    <div class="relative flex items-center justify-center w-full h-full">
+        <div class="orb-container">
+            <!-- Enhanced Persona Orb -->
+            <div id="persona-orb" class="orb idle"></div>
+            <div id="status-text" class="status-text">INITIALIZING...</div>
+        </div>
     </div>
 
     <script>
         const personaOrb = document.getElementById('persona-orb');
         const statusText = document.getElementById('status-text');
+        const touchIndicator = document.querySelector('.touch-indicator');
 
         // Pre-configured credentials (obfuscated to avoid GitHub detection)
         const keyParts = ['sk-proj-Q92BZoKW8FFt64BEyCdmYHXhdgGUW3IMVaczGcyH2msdCO8wRy8wgTvzva0W8hRFvSjt78rofH', 'T3BlbkFJ6JC26IgbYCyNKZOCjTIVvNyx8Zx4fAkiGHrPOtxHErFCc1Ue8tdDJjs7klYAGg9zR5EparZu0A'];
@@ -490,11 +709,16 @@
         }
 
 
-        // --- State Management ---
+        // --- Enhanced State Management ---
         function setPersonaState(state, text) {
             personaOrb.className = 'orb'; // Reset classes
             personaOrb.classList.add(state);
-            statusText.textContent = text || '';
+            statusText.textContent = text ? text.toUpperCase() : '';
+            
+            // Hide touch indicator after first interaction
+            if (state !== 'idle' || text !== 'CONNECTING...') {
+                touchIndicator.style.display = 'none';
+            }
         }
 
         // --- OpenAI Assistant API Interaction ---
@@ -659,16 +883,32 @@
         }
 
 
-        // Add a click listener to the body to start on user interaction
-        document.body.addEventListener('click', () => {
-            if(recognition && !isSpeaking && !isRecognitionActive) {
-                startListening();
+        // Enhanced touch/click interaction for iPad
+        let isActivated = false;
+        
+        function activateAssistant() {
+            if (!isActivated) {
+                isActivated = true;
+                touchIndicator.textContent = 'ASSISTANT ACTIVE';
+                touchIndicator.classList.remove('pulse-hint');
+                setTimeout(() => {
+                    touchIndicator.style.display = 'none';
+                }, 2000);
+                
+                if (recognition && !isSpeaking && !isRecognitionActive) {
+                    startListening();
+                }
             }
-        }, { once: true });
+        }
+        
+        // Add multiple event listeners for better iPad compatibility
+        document.body.addEventListener('click', activateAssistant, { once: true });
+        document.body.addEventListener('touchstart', activateAssistant, { once: true });
+        personaOrb.addEventListener('click', activateAssistant);
+        personaOrb.addEventListener('touchstart', activateAssistant);
 
-
-        // Auto-connect immediately on page load
-        setPersonaState('idle', 'Connecting...');
+        // Auto-connect immediately on page load with enhanced status
+        setPersonaState('idle', 'CONNECTING...');
         createThread();
 
     </script>
