@@ -353,7 +353,7 @@
             }
         }
 
-        // Test Realtime API access
+        // Test Realtime API access and get model name
         async function testRealtimeAccess() {
             try {
                 console.log('🧪 Testing Realtime API access...');
@@ -369,36 +369,37 @@
                     const realtimeModel = models.data.find(m => m.id.includes('realtime'));
                     if (realtimeModel) {
                         console.log('✅ Realtime API access confirmed:', realtimeModel.id);
-                        return true;
+                        return realtimeModel.id; // Return the actual model ID
                     } else {
                         console.log('❌ No Realtime models found in account');
                         console.log('Available models:', models.data.map(m => m.id));
-                        return false;
+                        return null;
                     }
                 } else {
                     console.error('❌ Failed to fetch models:', response.status);
-                    return false;
+                    return null;
                 }
             } catch (error) {
                 console.error('❌ Error testing Realtime access:', error);
-                return false;
+                return null;
             }
         }
 
         // Connect to OpenAI Realtime API
         async function connectRealtime() {
             try {
-                // Test access first
-                const hasAccess = await testRealtimeAccess();
-                if (!hasAccess) {
+                // Test access first and get the available model
+                const availableModel = await testRealtimeAccess();
+                if (!availableModel) {
                     setPersonaState('idle', 'REALTIME API ACCESS REQUIRED');
                     console.error('❌ Realtime API access not available. Please request access from OpenAI.');
                     return;
                 }
                 
-                console.log('🔌 Connecting to OpenAI Realtime API...');
+                console.log('🔌 Connecting to OpenAI Realtime API with model:', availableModel);
                 
-                const url = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
+                // Use the detected realtime model
+                const url = `wss://api.openai.com/v1/realtime?model=${availableModel}`;
                 realtimeSocket = new WebSocket(url, [`bearer-${apiKey}`, 'realtime-v1']);
 
                 realtimeSocket.onopen = () => {
