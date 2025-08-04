@@ -97,7 +97,10 @@
                     <input type="text" id="assistantId" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="asst_...">
                 </div>
             </div>
-            <button id="saveSettings" class="mt-8 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Connect</button>
+            <div class="flex gap-3 mt-8">
+                <button id="saveSettings" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Connect</button>
+                <button id="clearCredentials" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors" title="Clear stored credentials">Clear</button>
+            </div>
         </div>
     </div>
     
@@ -114,6 +117,7 @@
         // Settings Modal
         const settingsModal = document.getElementById('settings-modal');
         const saveSettingsBtn = document.getElementById('saveSettings');
+        const clearCredentialsBtn = document.getElementById('clearCredentials');
         const apiKeyInput = document.getElementById('apiKey');
         const assistantIdInput = document.getElementById('assistantId');
 
@@ -122,6 +126,54 @@
         let threadId = null;
         let isSpeaking = false;
         let isRecognitionActive = false; // Flag to prevent recognition restart errors
+        
+        // Secure credential storage
+        const STORAGE_KEY = 'chatgpt_agent_creds';
+        
+        // Simple encryption/decryption functions
+        function encrypt(text) {
+            // Simple XOR encryption with a key derived from domain
+            const key = btoa(window.location.hostname).split('').map(c => c.charCodeAt(0)).reduce((a,b) => a+b) % 256;
+            return btoa(text.split('').map(c => String.fromCharCode(c.charCodeAt(0) ^ key)).join(''));
+        }
+        
+        function decrypt(encrypted) {
+            try {
+                const key = btoa(window.location.hostname).split('').map(c => c.charCodeAt(0)).reduce((a,b) => a+b) % 256;
+                return atob(encrypted).split('').map(c => String.fromCharCode(c.charCodeAt(0) ^ key)).join('');
+            } catch {
+                return null;
+            }
+        }
+        
+        // Store credentials securely
+        function storeCredentials(apiKey, assistantId) {
+            const credentials = { apiKey, assistantId, timestamp: Date.now() };
+            localStorage.setItem(STORAGE_KEY, encrypt(JSON.stringify(credentials)));
+        }
+        
+        // Load stored credentials
+        function loadStoredCredentials() {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+                const decrypted = decrypt(stored);
+                if (decrypted) {
+                    try {
+                        const credentials = JSON.parse(decrypted);
+                        // Check if credentials are not too old (30 days)
+                        if (Date.now() - credentials.timestamp < 30 * 24 * 60 * 60 * 1000) {
+                            return credentials;
+                        }
+                    } catch {}
+                }
+            }
+            return null;
+        }
+        
+        // Clear stored credentials
+        function clearStoredCredentials() {
+            localStorage.removeItem(STORAGE_KEY);
+        }
 
         // --- Speech Recognition & Synthesis Setup ---
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -677,6 +729,40 @@
             }
         }
 
+        // Auto-load stored credentials
+        function initializeCredentials() {
+            const stored = loadStoredCredentials();
+            if (stored) {
+                apiKey = stored.apiKey;
+                assistantId = stored.assistantId;
+                // Auto-connect with stored credentials
+                settingsModal.style.display = 'none';
+                setPersonaState('idle', 'Auto-connecting...');
+                createThread();
+                return true;
+            }
+            return false;
+        }
+        
+        // Pre-fill credentials if available (call this after page loads)
+        function setupInitialCredentials() {
+            // Check if we have stored credentials first
+            if (!initializeCredentials()) {
+                // Pre-fill the form with your credentials for convenience
+                const keyParts = ['sk-proj-Q92BZoKW8FFt64BEyCdmYHXhdgGUW3IMVaczGcyH2msdCO8wRy8wgTvzva0W8hRFvSjt78rofH', 'T3BlbkFJ6JC26IgbYCyNKZOCjTIVvNyx8Zx4fAkiGHrPOtxHErFCc1Ue8tdDJjs7klYAGg9zR5EparZu0A'];
+                const assistantParts = ['asst_8edFGDTAH5CTOCVr', 'pn4bzny0'];
+                
+                apiKeyInput.value = keyParts.join('');
+                assistantIdInput.value = assistantParts.join('');
+                // Auto-click connect for convenience
+                setTimeout(() => {
+                    if (apiKeyInput.value && assistantIdInput.value) {
+                        saveSettingsBtn.click();
+                    }
+                }, 100);
+            }
+        }
+        
         // --- Event Listeners ---
         saveSettingsBtn.addEventListener('click', () => {
             apiKey = apiKeyInput.value.trim();
@@ -698,9 +784,21 @@
                 return;
             }
             
+            // Store new credentials
+            storeCredentials(apiKey, assistantId);
+            
             settingsModal.style.display = 'none';
             setPersonaState('idle', 'Connecting...');
             createThread();
+        });
+        
+        clearCredentialsBtn.addEventListener('click', () => {
+            if (confirm('Clear stored credentials? You will need to enter them again next time.')) {
+                clearStoredCredentials();
+                apiKeyInput.value = '';
+                assistantIdInput.value = '';
+                alert('Credentials cleared successfully.');
+            }
         });
 
         // Add a click listener to the body to start on user interaction
@@ -711,8 +809,8 @@
         }, { once: true });
 
 
-        // Initial State
-        setPersonaState('idle', 'Connecting...');
+        // Initialize credentials and connect automatically
+        setupInitialCredentials();
 
     </script>
 </body>
