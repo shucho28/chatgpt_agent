@@ -96,16 +96,6 @@
                     <label for="assistantId" class="block text-sm font-medium text-gray-300">Assistant ID</label>
                     <input type="text" id="assistantId" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="asst_...">
                 </div>
-                <div>
-                    <label for="primaryLanguage" class="block text-sm font-medium text-gray-300">Primary Language</label>
-                    <select id="primaryLanguage" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                        <option value="en-US">English</option>
-                        <option value="hi-IN">हिन्दी (Hindi)</option>
-                        <option value="fr-FR">Français (French)</option>
-                        <option value="mr-IN">मराठी (Marathi)</option>
-                        <option value="hi-IN-angika">अंगिका (Angika)</option>
-                    </select>
-                </div>
             </div>
             <button id="saveSettings" class="mt-8 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Connect</button>
         </div>
@@ -126,11 +116,9 @@
         const saveSettingsBtn = document.getElementById('saveSettings');
         const apiKeyInput = document.getElementById('apiKey');
         const assistantIdInput = document.getElementById('assistantId');
-        const primaryLanguageSelect = document.getElementById('primaryLanguage');
 
         let apiKey = '';
         let assistantId = '';
-        let primaryLanguage = 'en-US';
         let threadId = null;
         let isSpeaking = false;
         let isRecognitionActive = false; // Flag to prevent recognition restart errors
@@ -160,8 +148,8 @@
             if (SpeechRecognition) {
                 recognition = new SpeechRecognition();
                 recognition.continuous = false; 
-                // Set primary language, but allow browser to detect others
-                recognition.lang = primaryLanguage;
+                // Auto-detect languages - browser will handle multilingual recognition
+                recognition.lang = 'en-US'; // Default, but browser auto-detects
                 recognition.interimResults = false;
                 recognition.maxAlternatives = 3; // Get multiple alternatives for better accuracy
 
@@ -632,7 +620,6 @@
         saveSettingsBtn.addEventListener('click', () => {
             apiKey = apiKeyInput.value.trim();
             assistantId = assistantIdInput.value.trim();
-            primaryLanguage = primaryLanguageSelect.value;
             
             // Basic validation
             if (!apiKey || !assistantId) {
@@ -649,9 +636,6 @@
                 alert('Assistant ID should start with "asst_"');
                 return;
             }
-            
-            // Reinitialize speech recognition with new language
-            initializeSpeechRecognition();
             
             settingsModal.style.display = 'none';
             setPersonaState('idle', 'Connecting...');
