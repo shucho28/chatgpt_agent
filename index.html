@@ -322,7 +322,6 @@
         let threadId = null;
         let isSpeaking = false;
         let isRecognitionActive = false; // Flag to prevent recognition restart errors
-        let isFirstInteraction = true; // Track first interaction for context setup
 
         // --- Speech Recognition & Synthesis Setup ---
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -795,46 +794,7 @@
             try {
                 console.log('📝 Adding message to thread...');
                 
-                // Add system context on first interaction
-                if (isFirstInteraction) {
-                    console.log('🔧 Setting up voice interface context...');
-                    const systemMessage = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${apiKey}`,
-                            'Content-Type': 'application/json',
-                            'OpenAI-Beta': 'assistants=v2'
-                        },
-                        body: JSON.stringify({
-                            role: 'user',
-                            content: `[SYSTEM CONTEXT] You are now operating through a voice-activated home assistant interface. The user is interacting with you via:
-
-• Futuristic iPad app at shucho.space
-• Voice input (speech-to-text converted)
-• Voice output (your responses will be spoken aloud)
-• Real-time conversation interface
-
-Please adapt your communication style for voice interaction:
-- Keep responses conversational and natural
-- Avoid overly long responses (30-60 seconds when spoken)
-- Use appropriate pauses and inflection cues
-- Acknowledge that you can "hear" and "speak" with the user
-- Be aware this is a home assistant context
-
-The user's first message follows next.`
-                        })
-                    });
-                    
-                    if (systemMessage.ok) {
-                        console.log('✅ System context established');
-                    }
-                    isFirstInteraction = false;
-                }
-                
-                // Create enhanced context-aware message
-                const contextualPrompt = `[VOICE INPUT] User spoke: "${prompt}"`;
-
-                // 1. Add message to thread
+                // 1. Add message to thread (clean, direct message)
                 const messageResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
                     method: 'POST',
                     headers: {
@@ -844,7 +804,7 @@ The user's first message follows next.`
                     },
                     body: JSON.stringify({
                         role: 'user',
-                        content: contextualPrompt
+                        content: prompt
                     })
                 });
                 
