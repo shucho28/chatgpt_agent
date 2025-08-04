@@ -252,8 +252,39 @@
             setPersonaState('speaking', '...');
             
             try {
-                // Use an empty API key for Google's TTS, as the environment provides it.
-                const geminiApiKey = ""; 
+                // Try using browser's built-in speech synthesis as fallback
+                if ('speechSynthesis' in window) {
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 0.9;
+                    utterance.pitch = 1.0;
+                    utterance.volume = 1.0;
+                    
+                    utterance.onend = () => {
+                        isSpeaking = false;
+                        setPersonaState('idle', 'Ready');
+                        startListening();
+                    };
+                    
+                    utterance.onerror = () => {
+                        isSpeaking = false;
+                        setPersonaState('idle', 'Speech Error');
+                        startListening();
+                    };
+                    
+                    speechSynthesis.speak(utterance);
+                    return;
+                }
+                
+                // Fallback: If no TTS available, just continue
+                console.warn('No TTS available');
+                isSpeaking = false;
+                setPersonaState('idle', 'Ready');
+                startListening();
+                return;
+                
+                // Original Gemini TTS code (commented out - requires API key)
+                /*
+                const geminiApiKey = "YOUR_GEMINI_API_KEY_HERE"; 
                 const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiApiKey}`;
                 const payload = {
                     contents: [{ parts: [{ text: text }] }],
@@ -307,6 +338,7 @@
                 } else {
                      throw new Error('No audio data in response.');
                 }
+                */
 
             } catch(e) {
                  console.error('Error in speak function:', e);
@@ -337,8 +369,16 @@
                     }
                 });
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(`API Error: ${errorData.error.message}`);
+                    const errorData = await response.json().catch(() => ({ error: { message: 'Unknown API error' } }));
+                    const errorMsg = errorData.error?.message || 'Failed to create thread';
+                    if (response.status === 401) {
+                        setPersonaState('idle', 'Invalid API key');
+                    } else if (response.status === 429) {
+                        setPersonaState('idle', 'Rate limited');
+                    } else {
+                        setPersonaState('idle', 'Connection failed');
+                    }
+                    throw new Error(`API Error: ${errorMsg}`);
                 }
                 const data = await response.json();
                 threadId = data.id;
@@ -346,8 +386,10 @@
                 setPersonaState('idle', "Ready");
                 startListening();
             } catch (error) {
-                console.error(error);
-                setPersonaState('idle', 'Connection failed.');
+                console.error('Thread creation error:', error);
+                if (!personaOrb.classList.contains('idle')) {
+                    setPersonaState('idle', 'Connection failed');
+                }
             }
         }
 
@@ -367,7 +409,7 @@
             
             try {
                 // 1. Add message to thread
-                await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+                const messageResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${apiKey}`,
@@ -379,6 +421,10 @@
                         content: prompt
                     })
                 });
+                
+                if (!messageResponse.ok) {
+                    throw new Error(`Failed to add message: ${messageResponse.status}`);
+                }
 
                 // 2. Create a run
                 const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
@@ -392,10 +438,20 @@
                         assistant_id: assistantId
                     })
                 });
+                
+                if (!runResponse.ok) {
+                    const errorData = await runResponse.json().catch(() => ({}));
+                    const errorMsg = errorData.error?.message || 'Failed to create run';
+                    throw new Error(errorMsg);
+                }
+                
                 const run = await runResponse.json();
 
-                // 3. Poll for run completion
+                // 3. Poll for run completion with timeout
                 let runStatus;
+                let pollCount = 0;
+                const maxPolls = 30; // 30 seconds timeout
+                
                 do {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     const statusResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${run.id}`, {
@@ -404,12 +460,22 @@
                             'OpenAI-Beta': 'assistants=v2'
                         }
                     });
+                    
+                    if (!statusResponse.ok) {
+                        throw new Error('Failed to check run status');
+                    }
+                    
                     const statusData = await statusResponse.json();
                     runStatus = statusData.status;
+                    pollCount++;
+                    
+                    if (pollCount >= maxPolls) {
+                        throw new Error('Request timeout - please try again');
+                    }
                 } while (runStatus === 'in_progress' || runStatus === 'queued');
 
                 if(runStatus !== 'completed') {
-                    throw new Error(`Run finished with status: ${runStatus}`);
+                    throw new Error(`Assistant error: ${runStatus}`);
                 }
 
                 // 4. Retrieve latest messages
@@ -419,14 +485,35 @@
                         'OpenAI-Beta': 'assistants=v2'
                     }
                 });
+                
+                if (!messagesResponse.ok) {
+                    throw new Error('Failed to retrieve messages');
+                }
+                
                 const messagesData = await messagesResponse.json();
-                const assistantMessage = messagesData.data[0].content[0].text.value;
+                const assistantMessage = messagesData.data[0]?.content[0]?.text?.value;
+                
+                if (!assistantMessage) {
+                    throw new Error('No response from assistant');
+                }
                 
                 await speak(assistantMessage);
 
             } catch (error) {
                 console.error("Error during assistant interaction:", error);
-                await speak("I'm having trouble connecting. Please try again in a moment.");
+                let errorMessage = "I'm having trouble right now. ";
+                
+                if (error.message.includes('timeout')) {
+                    errorMessage += "The request took too long. Please try again.";
+                } else if (error.message.includes('401')) {
+                    errorMessage += "Please check your API credentials.";
+                } else if (error.message.includes('429')) {
+                    errorMessage += "Too many requests. Please wait a moment.";
+                } else {
+                    errorMessage += "Please try again in a moment.";
+                }
+                
+                await speak(errorMessage);
             }
         }
 
@@ -434,12 +521,26 @@
         saveSettingsBtn.addEventListener('click', () => {
             apiKey = apiKeyInput.value.trim();
             assistantId = assistantIdInput.value.trim();
-            if (apiKey && assistantId) {
-                settingsModal.style.display = 'none';
-                createThread();
-            } else {
+            
+            // Basic validation
+            if (!apiKey || !assistantId) {
                 alert('Please provide both API Key and Assistant ID.');
+                return;
             }
+            
+            if (!apiKey.startsWith('sk-')) {
+                alert('OpenAI API Key should start with "sk-"');
+                return;
+            }
+            
+            if (!assistantId.startsWith('asst_')) {
+                alert('Assistant ID should start with "asst_"');
+                return;
+            }
+            
+            settingsModal.style.display = 'none';
+            setPersonaState('idle', 'Connecting...');
+            createThread();
         });
 
         // Add a click listener to the body to start on user interaction
