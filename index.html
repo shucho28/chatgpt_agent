@@ -725,6 +725,9 @@
         
         async function createThread() {
             try {
+                console.log('Creating thread with API key:', apiKey ? 'API key present' : 'API key missing');
+                console.log('Assistant ID:', assistantId);
+                
                 const response = await fetch('https://api.openai.com/v1/threads', {
                     method: 'POST',
                     headers: {
@@ -733,46 +736,63 @@
                         'OpenAI-Beta': 'assistants=v2'
                     }
                 });
+                
+                console.log('Thread creation response status:', response.status);
+                
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({ error: { message: 'Unknown API error' } }));
+                    console.error('Thread creation failed:', errorData);
                     const errorMsg = errorData.error?.message || 'Failed to create thread';
                     if (response.status === 401) {
-                        setPersonaState('idle', 'Invalid API key');
+                        setPersonaState('idle', 'Invalid API Key');
+                        console.error('Invalid API key provided');
                     } else if (response.status === 429) {
-                        setPersonaState('idle', 'Rate limited');
+                        setPersonaState('idle', 'Rate Limited');
+                        console.error('Rate limited by OpenAI');
                     } else {
-                        setPersonaState('idle', 'Connection failed');
+                        setPersonaState('idle', 'Connection Failed');
+                        console.error('Connection failed:', response.status, errorMsg);
                     }
                     throw new Error(`API Error: ${errorMsg}`);
                 }
+                
                 const data = await response.json();
                 threadId = data.id;
-                console.log("Thread created:", threadId);
+                console.log("✅ Thread created successfully:", threadId);
                 setPersonaState('idle', "Ready");
                 startListening();
             } catch (error) {
-                console.error('Thread creation error:', error);
-                if (!personaOrb.classList.contains('idle')) {
-                    setPersonaState('idle', 'Connection failed');
-                }
+                console.error('❌ Thread creation error:', error);
+                setPersonaState('idle', 'Setup Failed');
+                // Retry after 5 seconds
+                setTimeout(() => {
+                    console.log('Retrying thread creation...');
+                    createThread();
+                }, 5000);
             }
         }
 
         async function handleUserMessage(prompt) {
-            if (!prompt) return;
+            if (!prompt) {
+                console.log('❌ Empty prompt received');
+                return;
+            }
             
-            // Recognition has already stopped via the onresult event.
-            setPersonaState('thinking', 'Thinking...');
+            console.log('🎤 User said:', prompt);
+            setPersonaState('thinking', 'Processing...');
 
             if (!threadId) {
+                console.log('⚠️ No thread ID, creating thread...');
                 await createThread();
                 if(!threadId) {
-                    await speak("I couldn't start a conversation. Please check the API keys and refresh.");
+                    console.error('❌ Failed to create thread');
+                    await speak("I couldn't start a conversation. Please check your connection and try again.");
                     return;
                 }
             }
             
             try {
+                console.log('📝 Adding message to thread...');
                 // 1. Add message to thread
                 const messageResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
                     method: 'POST',
@@ -788,9 +808,13 @@
                 });
                 
                 if (!messageResponse.ok) {
+                    const errorData = await messageResponse.json().catch(() => ({}));
+                    console.error('❌ Failed to add message:', messageResponse.status, errorData);
                     throw new Error(`Failed to add message: ${messageResponse.status}`);
                 }
+                console.log('✅ Message added to thread');
 
+                console.log('🚀 Creating run with assistant ID:', assistantId);
                 // 2. Create a run
                 const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
                     method: 'POST',
@@ -806,16 +830,19 @@
                 
                 if (!runResponse.ok) {
                     const errorData = await runResponse.json().catch(() => ({}));
+                    console.error('❌ Failed to create run:', runResponse.status, errorData);
                     const errorMsg = errorData.error?.message || 'Failed to create run';
                     throw new Error(errorMsg);
                 }
                 
                 const run = await runResponse.json();
+                console.log('✅ Run created:', run.id);
 
+                console.log('⏳ Polling for completion...');
                 // 3. Poll for run completion with timeout
                 let runStatus;
                 let pollCount = 0;
-                const maxPolls = 30; // 30 seconds timeout
+                const maxPolls = 60; // 60 seconds timeout
                 
                 do {
                     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -827,22 +854,28 @@
                     });
                     
                     if (!statusResponse.ok) {
+                        console.error('❌ Failed to check run status:', statusResponse.status);
                         throw new Error('Failed to check run status');
                     }
                     
                     const statusData = await statusResponse.json();
                     runStatus = statusData.status;
+                    console.log(`📊 Run status: ${runStatus} (${pollCount + 1}/${maxPolls})`);
                     pollCount++;
                     
                     if (pollCount >= maxPolls) {
+                        console.error('❌ Request timeout after', maxPolls, 'seconds');
                         throw new Error('Request timeout - please try again');
                     }
                 } while (runStatus === 'in_progress' || runStatus === 'queued');
 
                 if(runStatus !== 'completed') {
+                    console.error('❌ Run failed with status:', runStatus);
                     throw new Error(`Assistant error: ${runStatus}`);
                 }
+                console.log('✅ Run completed successfully');
 
+                console.log('📨 Retrieving messages...');
                 // 4. Retrieve latest messages
                 const messagesResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
                     headers: {
@@ -852,30 +885,40 @@
                 });
                 
                 if (!messagesResponse.ok) {
+                    console.error('❌ Failed to retrieve messages:', messagesResponse.status);
                     throw new Error('Failed to retrieve messages');
                 }
                 
                 const messagesData = await messagesResponse.json();
+                console.log('📨 Messages retrieved:', messagesData.data?.length || 0, 'messages');
+                
                 const assistantMessage = messagesData.data[0]?.content[0]?.text?.value;
                 
                 if (!assistantMessage) {
+                    console.error('❌ No response from assistant');
+                    console.log('Message data:', messagesData.data[0]);
                     throw new Error('No response from assistant');
                 }
                 
+                console.log('🤖 Assistant response:', assistantMessage);
                 await speak(assistantMessage);
 
             } catch (error) {
-                console.error("Error during assistant interaction:", error);
+                console.error("❌ Error during assistant interaction:", error);
                 let errorMessage = "I'm having trouble right now. ";
                 
                 if (error.message.includes('timeout')) {
                     errorMessage += "The request took too long. Please try again.";
+                    console.error('🕐 Timeout error');
                 } else if (error.message.includes('401')) {
                     errorMessage += "Please check your API credentials.";
+                    console.error('🔑 Authentication error');
                 } else if (error.message.includes('429')) {
                     errorMessage += "Too many requests. Please wait a moment.";
+                    console.error('🚫 Rate limit error');
                 } else {
                     errorMessage += "Please try again in a moment.";
+                    console.error('❓ Unknown error:', error.message);
                 }
                 
                 await speak(errorMessage);
