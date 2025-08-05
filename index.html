@@ -387,19 +387,10 @@
                 realtimeSocket.onopen = () => {
                     console.log('✅ Connected to Realtime API');
                     
-                    // Test with g711_ulaw format explicitly (OpenAI documented format)
-                    setTimeout(() => {
-                        console.log('🔧 Testing with g711_ulaw audio format...');
-                        realtimeSocket.send(JSON.stringify({
-                            type: 'session.update',
-                            session: {
-                                input_audio_format: 'g711_ulaw',
-                                output_audio_format: 'g711_ulaw'
-                            }
-                        }));
-                    }, 500); // Shorter delay
+                    // Do NOT send session.update immediately - wait for session.created
+                    console.log('🔧 Waiting for session.created before configuring...');
                     
-                    setPersonaState('idle', 'Configuring g711_ulaw...');
+                    setPersonaState('idle', 'Waiting for session...');
                     isConnected = true;
 
                     // Show mode indicator
@@ -487,20 +478,17 @@
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
                     
-                    // Convert to g711_ulaw format
-                    const ulawData = new Uint8Array(inputData.length);
+                    // Convert to PCM16 format (configured via session.update)
+                    const pcm16Data = new Int16Array(inputData.length);
                     
                     for (let i = 0; i < inputData.length; i++) {
-                        // Convert float32 (-1 to 1) to 16-bit PCM first
-                        const pcm16 = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-                        // Convert PCM16 to μ-law
-                        ulawData[i] = linearToUlaw(pcm16);
+                        pcm16Data[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
                     }
                     
-                    // Send audio data to Realtime API in g711_ulaw format
+                    // Send audio data to Realtime API in PCM16 format
                     realtimeSocket.send(JSON.stringify({
                         type: 'input_audio_buffer.append',
-                        audio: arrayBufferToBase64(ulawData.buffer)
+                        audio: arrayBufferToBase64(pcm16Data.buffer)
                     }));
                 } catch (error) {
                     console.error('❌ Audio processing error:', error);
@@ -537,11 +525,21 @@
                 case 'session.created':
                     console.log('✅ Realtime session created');
                     connectionAttempts = 0; // Reset retry counter on success
-                    // Don't start audio yet - wait for audio configuration
+                    
+                    // Now send session configuration immediately after session is created
+                    console.log('🔧 Sending session configuration after session.created...');
+                    realtimeSocket.send(JSON.stringify({
+                        type: 'session.update',
+                        session: {
+                            input_audio_format: 'pcm16',
+                            output_audio_format: 'pcm16'
+                        }
+                    }));
+                    setPersonaState('idle', 'Configuring PCM16...');
                     break;
                 
                 case 'session.updated':
-                    console.log('✅ Session audio configuration updated to g711_ulaw');
+                    console.log('✅ Session audio configuration updated to PCM16');
                     isSessionReady = true;
                     setPersonaState('idle', 'Ready');
                     // Now it's safe to start audio streaming
@@ -626,20 +624,15 @@
             try {
                 const audioData = base64ToArrayBuffer(base64Audio);
                 
-                // Decode g711_ulaw format from OpenAI
-                const ulawBytes = new Uint8Array(audioData);
-                const pcmData = new Int16Array(ulawBytes.length);
+                // Decode PCM16 format from OpenAI
+                const pcm16Array = new Int16Array(audioData);
                 
-                for (let i = 0; i < ulawBytes.length; i++) {
-                    pcmData[i] = ulawToLinear(ulawBytes[i]);
-                }
-                
-                // Create audio buffer from decoded PCM data
-                const audioBuffer = audioContext.createBuffer(1, pcmData.length, 24000);
+                // Create audio buffer from PCM16 data
+                const audioBuffer = audioContext.createBuffer(1, pcm16Array.length, 24000);
                 const channelData = audioBuffer.getChannelData(0);
                 
-                for (let i = 0; i < pcmData.length; i++) {
-                    channelData[i] = pcmData[i] / 32768; // Convert to float32
+                for (let i = 0; i < pcm16Array.length; i++) {
+                    channelData[i] = pcm16Array[i] / 32768; // Convert to float32
                 }
                 
                 const source = audioContext.createBufferSource();
