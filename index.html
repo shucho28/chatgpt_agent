@@ -324,9 +324,21 @@
         const touchIndicator = document.querySelector('.touch-indicator');
         const modeIndicator = document.getElementById('mode-indicator');
 
-        // Realtime API Configuration
-        const PROXY_URL = 'ws://localhost:3001/realtime';
+        // Realtime API Configuration - Auto-detect environment
+        const getProxyURL = () => {
+            // Check if we're on GitHub Pages (shucho.space)
+            if (window.location.hostname === 'shucho.space' || window.location.hostname.includes('github.io')) {
+                // Production proxy server URL (you'll need to deploy the server and update this)
+                return 'wss://your-proxy-server.vercel.app/realtime'; // Update this after deployment
+            }
+            // Local development
+            return 'ws://localhost:3001/realtime';
+        };
+        
+        const PROXY_URL = getProxyURL();
         const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-10-01';
+        
+        console.log('🔧 Using proxy URL:', PROXY_URL);
         
         // State variables
         let realtimeSocket = null;
@@ -410,12 +422,20 @@
                 
                 realtimeSocket.onerror = (error) => {
                     console.error('❌ Realtime WebSocket error:', error);
-                    setPersonaState('idle', 'Connection failed');
+                    if (PROXY_URL.includes('your-proxy-server')) {
+                        setPersonaState('idle', 'Server not deployed yet');
+                    } else {
+                        setPersonaState('idle', 'Connection failed');
+                    }
                 };
                 
                 realtimeSocket.onclose = (event) => {
                     console.log('🔌 Realtime WebSocket closed:', event.code, event.reason);
-                    setPersonaState('idle', 'Disconnected');
+                    if (PROXY_URL.includes('your-proxy-server')) {
+                        setPersonaState('idle', 'Deploy server first');
+                    } else {
+                        setPersonaState('idle', 'Disconnected');
+                    }
                     isConnected = false;
                 };
                 
