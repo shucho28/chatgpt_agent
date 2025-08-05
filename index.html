@@ -328,8 +328,8 @@
         const getProxyURL = () => {
             // Check if we're on GitHub Pages (shucho.space)
             if (window.location.hostname === 'shucho.space' || window.location.hostname.includes('github.io')) {
-                // Production proxy server URL (you'll need to deploy the server and update this)
-                return 'wss://your-proxy-server.vercel.app/realtime'; // Update this after deployment
+                // GitHub Codespace URL - UPDATE THIS with your actual Codespace URL
+                return 'wss://REPLACE-WITH-YOUR-CODESPACE-URL.app.github.dev/realtime';
             }
             // Local development
             return 'ws://localhost:3001/realtime';
