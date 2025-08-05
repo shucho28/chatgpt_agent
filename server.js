@@ -6,6 +6,45 @@ const url = require('url');
 const PORT = process.env.PORT || 3001;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'sk-proj-Q92BZoKW8FFt64BEyCdmYHXhdgGUW3IMVaczGcyH2msdCO8wRy8wgTvzva0W8hRFvSjt78rofH' + 'T3BlbkFJ6JC26IgbYCyNKZOCjTIVvNyx8Zx4fAkiGHrPOtxHErFCc1Ue8tdDJjs7klYAGg9zR5EparZu0A';
 
+// Validate API key
+if (!OPENAI_API_KEY || !OPENAI_API_KEY.startsWith('sk-')) {
+    console.error('❌ Invalid or missing OpenAI API key');
+    console.error('💡 Set OPENAI_API_KEY environment variable or update server.js');
+    process.exit(1);
+}
+
+console.log('🔑 API Key format:', OPENAI_API_KEY.substring(0, 20) + '...' + OPENAI_API_KEY.substring(OPENAI_API_KEY.length - 4));
+
+// Test API key with a simple request
+async function testAPIKey() {
+    try {
+        const response = await fetch('https://api.openai.com/v1/models', {
+            headers: {
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                'User-Agent': 'OpenAI-Realtime-Proxy/1.0.0'
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const realtimeModel = data.data.find(model => model.id.includes('realtime'));
+            if (realtimeModel) {
+                console.log('✅ API key valid and has Realtime API access');
+            } else {
+                console.log('⚠️ API key valid but no Realtime API models found');
+                console.log('💡 You may need to request access to OpenAI Realtime API');
+            }
+        } else {
+            console.error('❌ API key test failed:', response.status, response.statusText);
+        }
+    } catch (error) {
+        console.error('❌ API key test error:', error.message);
+    }
+}
+
+// Test API key on startup
+testAPIKey();
+
 // Create HTTP server
 const server = http.createServer((req, res) => {
     // Enable CORS for all origins
