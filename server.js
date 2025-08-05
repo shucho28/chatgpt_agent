@@ -163,6 +163,12 @@ wss.on('connection', (clientWs, req) => {
         
         console.log(`🔧 Sending ${sessionUpdates.length} queued session.update messages...`);
         for (const sessionUpdate of sessionUpdates) {
+            try {
+                const parsed = JSON.parse(sessionUpdate);
+                console.log('🔧 Session config:', JSON.stringify(parsed.session, null, 2));
+            } catch (e) {
+                console.log('🔧 Raw session update:', sessionUpdate);
+            }
             openaiWs.send(sessionUpdate);
         }
         
