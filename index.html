@@ -387,20 +387,16 @@
                 realtimeSocket.onopen = () => {
                     console.log('✅ Connected to Realtime API');
                     
-                    // Send minimal audio configuration after successful connection
-                    setTimeout(() => {
-                        console.log('🔧 Sending minimal audio configuration...');
-                        realtimeSocket.send(JSON.stringify({
-                            type: 'session.update',
-                            session: {
-                                input_audio_format: 'pcm16',
-                                output_audio_format: 'pcm16'
-                            }
-                        }));
-                    }, 1000); // Wait 1 second after connection
+                    // DO NOT send session.update - use OpenAI defaults to avoid server errors
+                    console.log('🔧 Using OpenAI default audio configuration (no session.update)');
                     
-                    setPersonaState('idle', 'Configuring audio...');
+                    setPersonaState('idle', 'Ready - Using defaults');
                     isConnected = true;
+                    // Mark session as ready immediately since we're not configuring it
+                    isSessionReady = true;
+                    
+                    // Start audio streaming immediately with default formats
+                    startRealtimeAudio();
 
                     // Show mode indicator
                     modeIndicator.classList.add('visible');
@@ -486,17 +482,21 @@
                 
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
-                    const pcm16Data = new Int16Array(inputData.length);
                     
-                    // Convert float32 to PCM16
+                    // Use OpenAI's default format (g711_ulaw) - convert float32 to 8-bit ulaw
+                    const ulawData = new Uint8Array(inputData.length);
+                    
                     for (let i = 0; i < inputData.length; i++) {
-                        pcm16Data[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                        // Convert float32 (-1 to 1) to 16-bit PCM first
+                        const pcm16 = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                        // Convert PCM16 to μ-law
+                        ulawData[i] = linearToUlaw(pcm16);
                     }
                     
-                    // Send audio data to Realtime API
+                    // Send audio data to Realtime API in default format
                     realtimeSocket.send(JSON.stringify({
                         type: 'input_audio_buffer.append',
-                        audio: arrayBufferToBase64(pcm16Data.buffer)
+                        audio: arrayBufferToBase64(ulawData.buffer)
                     }));
                 } catch (error) {
                     console.error('❌ Audio processing error:', error);
@@ -531,17 +531,10 @@
 
             switch (message.type) {
                 case 'session.created':
-                    console.log('✅ Realtime session created');
+                    console.log('✅ Realtime session created with default configuration');
                     connectionAttempts = 0; // Reset retry counter on success
-                    // Don't start audio yet - wait for audio configuration
-                    break;
-                
-                case 'session.updated':
-                    console.log('✅ Session audio configuration updated');
-                    isSessionReady = true;
-                    setPersonaState('idle', 'Ready');
-                    // Now it's safe to start audio streaming
-                    startRealtimeAudio();
+                    // Session is already ready since we're using defaults
+                    console.log('✅ Using default session - no updates needed');
                     break;
                 
                 case 'input_audio_buffer.speech_started':
@@ -621,7 +614,22 @@
             const base64Audio = audioQueue.shift();
             try {
                 const audioData = base64ToArrayBuffer(base64Audio);
-                const audioBuffer = await audioContext.decodeAudioData(audioData);
+                
+                // OpenAI default format is g711_ulaw - decode it to PCM first
+                const ulawBytes = new Uint8Array(audioData);
+                const pcmData = new Int16Array(ulawBytes.length);
+                
+                for (let i = 0; i < ulawBytes.length; i++) {
+                    pcmData[i] = ulawToLinear(ulawBytes[i]);
+                }
+                
+                // Create audio buffer from PCM data
+                const audioBuffer = audioContext.createBuffer(1, pcmData.length, 24000);
+                const channelData = audioBuffer.getChannelData(0);
+                
+                for (let i = 0; i < pcmData.length; i++) {
+                    channelData[i] = pcmData[i] / 32768; // Convert to float32
+                }
                 
                 const source = audioContext.createBufferSource();
                 source.buffer = audioBuffer;
@@ -646,6 +654,45 @@
                 binary += String.fromCharCode(bytes[i]);
             }
             return btoa(binary);
+        }
+        
+        // μ-law encoding (OpenAI default format)
+        function linearToUlaw(pcm) {
+            const BIAS = 0x84;
+            const CLIP = 32635;
+            
+            let sign = (pcm >> 8) & 0x80;
+            if (sign) pcm = -pcm;
+            if (pcm > CLIP) pcm = CLIP;
+            pcm += BIAS;
+            
+            let exponent = 7;
+            let exponentMask = 0x4000;
+            for (let i = 0; i < 8; i++) {
+                if ((pcm & exponentMask) !== 0) break;
+                exponent--;
+                exponentMask >>= 1;
+            }
+            
+            const mantissa = (pcm >> (exponent + 3)) & 0x0F;
+            const ulaw = ~(sign | (exponent << 4) | mantissa);
+            
+            return ulaw & 0xFF;
+        }
+        
+        // μ-law decoding (OpenAI default format)
+        function ulawToLinear(ulaw) {
+            const BIAS = 0x84;
+            
+            ulaw = ~ulaw;
+            const sign = ulaw & 0x80;
+            const exponent = (ulaw >> 4) & 0x07;
+            const mantissa = ulaw & 0x0F;
+            
+            let sample = (mantissa << (exponent + 3)) + BIAS;
+            if (exponent > 0) sample += (1 << (exponent + 2));
+            
+            return sign ? -sample : sample;
         }
         
         function base64ToArrayBuffer(base64) {
