@@ -45,6 +45,10 @@ wss.on('connection', (clientWs, req) => {
     const query = url.parse(req.url, true).query;
     const model = query.model || 'gpt-4o-realtime-preview-2024-10-01';
     
+    // Message queue for handling messages before OpenAI connection is ready
+    let messageQueue = [];
+    let isSessionReady = false;
+    
     // Connect to OpenAI Realtime API
     const openaiUrl = `wss://api.openai.com/v1/realtime?model=${model}`;
     console.log('🚀 Connecting to OpenAI:', openaiUrl);
@@ -63,15 +67,30 @@ wss.on('connection', (clientWs, req) => {
             const message = JSON.parse(data);
             console.log('📤 Client message:', message.type);
             
-            if (openaiWs.readyState === WebSocket.OPEN) {
+            if (message.type === 'session.update') {
+                // Always send session.update immediately when OpenAI is connected
+                if (openaiWs.readyState === WebSocket.OPEN) {
+                    console.log('🔧 Sending session configuration immediately...');
+                    openaiWs.send(data);
+                } else {
+                    console.log('⚠️ OpenAI WebSocket not ready, queueing session.update');
+                    messageQueue.push(data);
+                }
+            } else if (openaiWs.readyState === WebSocket.OPEN && isSessionReady) {
+                console.log('📤 Sending message to ready session:', message.type);
                 openaiWs.send(data);
             } else {
-                console.log('⚠️ OpenAI WebSocket not ready, message queued');
+                console.log('⚠️ Queuing message until session is ready:', message.type);
+                messageQueue.push(data);
             }
         } catch (error) {
             console.log('📤 Client binary data:', data.length, 'bytes');
-            if (openaiWs.readyState === WebSocket.OPEN) {
+            if (openaiWs.readyState === WebSocket.OPEN && isSessionReady) {
+                console.log('📤 Sending binary data to ready session');
                 openaiWs.send(data);
+            } else {
+                console.log('⚠️ Queuing binary data until session is ready');
+                messageQueue.push(data);
             }
         }
     });
@@ -81,6 +100,41 @@ wss.on('connection', (clientWs, req) => {
         try {
             const message = JSON.parse(data);
             console.log('📥 OpenAI message:', message.type);
+            
+            // Handle session ready state
+            if (message.type === 'session.created') {
+                console.log('✅ Session created, setting ready state');
+                isSessionReady = true;
+                
+                // Process queued messages (except session.update which was already sent)
+                const nonSessionMessages = messageQueue.filter(msg => {
+                    try {
+                        const parsed = JSON.parse(msg);
+                        return parsed.type !== 'session.update';
+                    } catch {
+                        return true; // Keep binary messages
+                    }
+                });
+                
+                console.log(`📤 Processing ${nonSessionMessages.length} queued messages...`);
+                for (const queuedMessage of nonSessionMessages) {
+                    if (openaiWs.readyState === WebSocket.OPEN) {
+                        openaiWs.send(queuedMessage);
+                    }
+                }
+                
+                // Clear the queue
+                messageQueue = [];
+            }
+            
+            // Log error messages with full details
+            if (message.type === 'error') {
+                console.error('❌ OpenAI Error Details:');
+                console.error('   Code:', message.error?.code || 'unknown');
+                console.error('   Message:', message.error?.message || 'unknown');
+                console.error('   Type:', message.error?.type || 'unknown');
+                console.error('   Full error:', JSON.stringify(message.error, null, 2));
+            }
             
             if (clientWs.readyState === WebSocket.OPEN) {
                 clientWs.send(data);
