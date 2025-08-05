@@ -150,6 +150,31 @@ wss.on('connection', (clientWs, req) => {
     // Handle OpenAI connection events
     openaiWs.on('open', () => {
         console.log('✅ Connected to OpenAI Realtime API');
+        
+        // Send any queued session.update messages immediately
+        const sessionUpdates = messageQueue.filter(msg => {
+            try {
+                const parsed = JSON.parse(msg);
+                return parsed.type === 'session.update';
+            } catch {
+                return false;
+            }
+        });
+        
+        console.log(`🔧 Sending ${sessionUpdates.length} queued session.update messages...`);
+        for (const sessionUpdate of sessionUpdates) {
+            openaiWs.send(sessionUpdate);
+        }
+        
+        // Remove session.update messages from queue
+        messageQueue = messageQueue.filter(msg => {
+            try {
+                const parsed = JSON.parse(msg);
+                return parsed.type !== 'session.update';
+            } catch {
+                return true; // Keep binary messages
+            }
+        });
     });
     
     openaiWs.on('error', (error) => {
