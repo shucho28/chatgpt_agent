@@ -478,17 +478,19 @@
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
                     
-                    // Convert to PCM16 format (configured via session.update)
-                    const pcm16Data = new Int16Array(inputData.length);
+                    // Use default format (likely g711_ulaw) since we don't configure audio format
+                    const ulawData = new Uint8Array(inputData.length);
                     
                     for (let i = 0; i < inputData.length; i++) {
-                        pcm16Data[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                        // Convert float32 to PCM16 first, then to μ-law
+                        const pcm16 = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                        ulawData[i] = linearToUlaw(pcm16);
                     }
                     
-                    // Send audio data to Realtime API in PCM16 format
+                    // Send audio data in default format
                     realtimeSocket.send(JSON.stringify({
                         type: 'input_audio_buffer.append',
-                        audio: arrayBufferToBase64(pcm16Data.buffer)
+                        audio: arrayBufferToBase64(ulawData.buffer)
                     }));
                 } catch (error) {
                     console.error('❌ Audio processing error:', error);
@@ -526,20 +528,19 @@
                     console.log('✅ Realtime session created');
                     connectionAttempts = 0; // Reset retry counter on success
                     
-                    // Now send session configuration immediately after session is created
-                    console.log('🔧 Sending session configuration after session.created...');
+                    // Send minimal session configuration - just voice settings
+                    console.log('🔧 Sending minimal session configuration...');
                     realtimeSocket.send(JSON.stringify({
                         type: 'session.update',
                         session: {
-                            input_audio_format: 'pcm16',
-                            output_audio_format: 'pcm16'
+                            voice: 'alloy'
                         }
                     }));
-                    setPersonaState('idle', 'Configuring PCM16...');
+                    setPersonaState('idle', 'Setting voice...');
                     break;
                 
                 case 'session.updated':
-                    console.log('✅ Session audio configuration updated to PCM16');
+                    console.log('✅ Session updated with minimal configuration');
                     isSessionReady = true;
                     setPersonaState('idle', 'Ready');
                     // Now it's safe to start audio streaming
@@ -624,15 +625,20 @@
             try {
                 const audioData = base64ToArrayBuffer(base64Audio);
                 
-                // Decode PCM16 format from OpenAI
-                const pcm16Array = new Int16Array(audioData);
+                // Decode from default format (likely g711_ulaw)
+                const ulawBytes = new Uint8Array(audioData);
+                const pcmData = new Int16Array(ulawBytes.length);
                 
-                // Create audio buffer from PCM16 data
-                const audioBuffer = audioContext.createBuffer(1, pcm16Array.length, 24000);
+                for (let i = 0; i < ulawBytes.length; i++) {
+                    pcmData[i] = ulawToLinear(ulawBytes[i]);
+                }
+                
+                // Create audio buffer from decoded PCM data
+                const audioBuffer = audioContext.createBuffer(1, pcmData.length, 24000);
                 const channelData = audioBuffer.getChannelData(0);
                 
-                for (let i = 0; i < pcm16Array.length; i++) {
-                    channelData[i] = pcm16Array[i] / 32768; // Convert to float32
+                for (let i = 0; i < pcmData.length; i++) {
+                    channelData[i] = pcmData[i] / 32768; // Convert to float32
                 }
                 
                 const source = audioContext.createBufferSource();
