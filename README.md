@@ -57,6 +57,17 @@ This project is configured for GitHub Pages deployment:
 - Enable GitHub Pages in repository settings
 - Your assistant will be live at `https://yourusername.github.io/chatgpt_agent`
 
+### Server Deployment (Required for Voice)
+The voice assistant requires a WebSocket proxy server:
+
+**Option 1 - GitHub Codespaces (Easiest)**:
+1. Click "Code" → "Codespaces" → "Create codespace on main"
+2. Copy the public URL for port 3001
+3. Update the proxy URL in `index.html`
+4. Push changes
+
+**Option 2 - External Services**: See `DEPLOYMENT.md` for Vercel, Railway, Render options
+
 ## 🎯 Usage
 
 ### For iPad Home Assistant

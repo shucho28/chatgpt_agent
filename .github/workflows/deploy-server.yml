@@ -1,0 +1,62 @@
+name: Deploy Realtime API Proxy Server
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy-to-railway:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm install
+    
+    - name: Deploy to Railway
+      run: |
+        npm install -g @railway/cli
+        railway login --token ${{ secrets.RAILWAY_TOKEN }}
+        railway up --service proxy-server
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+  deploy-to-render:
+    runs-on: ubuntu-latest
+    if: failure() # Only runs if Railway deployment fails
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to Render
+      uses: johnbeynon/render-deploy-action@v0.0.8
+      with:
+        service-id: ${{ secrets.RENDER_SERVICE_ID }}
+        api-key: ${{ secrets.RENDER_API_KEY }}
+
+  update-client-url:
+    needs: [deploy-to-railway]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Update proxy URL in client
+      run: |
+        # Get the deployed URL (you'll need to update this based on your deployment)
+        DEPLOYED_URL="wss://your-github-deployed-server.up.railway.app/realtime"
+        
+        # Update the client code
+        sed -i "s|wss://your-proxy-server.vercel.app/realtime|$DEPLOYED_URL|g" index.html
+        
+        # Commit and push changes
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add index.html
+        git diff --staged --quiet || git commit -m "Auto-update proxy URL for production deployment"
+        git push

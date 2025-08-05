@@ -1,0 +1,29 @@
+name: Auto-Deploy Proxy Server
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy to Railway
+      uses: bketelsen/deploy-to-railway@main
+      with:
+        railway_token: ${{ secrets.RAILWAY_TOKEN }}
+        service: openai-realtime-proxy
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        
+    - name: Comment deployment URL
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.repos.createCommitComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            commit_sha: context.sha,
+            body: '🚀 Server deployed! Update the proxy URL in index.html to use the deployed service.'
+          })

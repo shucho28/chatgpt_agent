@@ -1,0 +1,25 @@
+{
+  "name": "OpenAI Realtime API Proxy",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:18",
+  "features": {},
+  "forwardPorts": [3001],
+  "portsAttributes": {
+    "3001": {
+      "label": "Realtime API Proxy",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    }
+  },
+  "postCreateCommand": "npm install",
+  "postStartCommand": "npm start",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.vscode-json"
+      ]
+    }
+  },
+  "containerEnv": {
+    "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}"
+  }
+}
