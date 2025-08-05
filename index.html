@@ -346,6 +346,7 @@
         let audioContext = null;
         let microphoneSource = null;
         let isConnected = false;
+        let isSessionReady = false;
         let isActivated = false;
         let isSpeaking = false;
 
@@ -407,9 +408,9 @@
                         }
                     }));
                     
-                    setPersonaState('idle', 'Ready');
+                    setPersonaState('idle', 'Configuring session...');
                     isConnected = true;
-                    startRealtimeAudio();
+                    // Note: Don't start audio streaming yet - wait for session.created
 
                     // Show mode indicator
                     modeIndicator.classList.add('visible');
@@ -447,7 +448,10 @@
 
         // Start real-time audio streaming with modern Web Audio API
         function startRealtimeAudio() {
-            if (!isConnected || !audioStream || !audioContext) return;
+            if (!isConnected || !isSessionReady || !audioStream || !audioContext) {
+                console.log('⚠️ Not ready for audio streaming:', { isConnected, isSessionReady, hasAudioStream: !!audioStream, hasAudioContext: !!audioContext });
+                return;
+            }
             
             console.log('🎤 Starting real-time audio streaming...');
             
@@ -486,7 +490,7 @@
             const processor = audioContext.createScriptProcessor(4096, 1, 1);
             
             processor.onaudioprocess = (event) => {
-                if (!isConnected || !realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN) {
+                if (!isConnected || !isSessionReady || !realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN) {
                     return;
                 }
                 
@@ -538,6 +542,10 @@
             switch (message.type) {
                 case 'session.created':
                     console.log('✅ Realtime session created');
+                    isSessionReady = true;
+                    setPersonaState('idle', 'Ready');
+                    // Now it's safe to start audio streaming
+                    startRealtimeAudio();
                     break;
                 
                 case 'input_audio_buffer.speech_started':
