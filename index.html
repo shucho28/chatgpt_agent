@@ -349,6 +349,8 @@
         let isSessionReady = false;
         let isActivated = false;
         let isSpeaking = false;
+        let connectionAttempts = 0;
+        let maxRetries = 3;
 
         // Initialize audio context and microphone
         async function initializeAudio() {
@@ -385,19 +387,13 @@
                 realtimeSocket.onopen = () => {
                     console.log('✅ Connected to Realtime API');
                     
-                    // Configure the session with minimal settings
+                    // Configure the session with absolute minimal settings
                     realtimeSocket.send(JSON.stringify({
                         type: 'session.update',
                         session: {
-                            modalities: ['text', 'audio'],
-                            instructions: 'You are a helpful voice assistant. Keep responses short and conversational.',
-                            voice: 'alloy',
-                            input_audio_format: 'pcm16',
-                            output_audio_format: 'pcm16',
-                            turn_detection: {
-                                type: 'server_vad'
-                            },
-                            temperature: 0.7
+                            modalities: ['audio'],
+                            instructions: 'You are a helpful assistant.',
+                            voice: 'alloy'
                         }
                     }));
                     
@@ -536,6 +532,7 @@
                 case 'session.created':
                     console.log('✅ Realtime session created');
                     isSessionReady = true;
+                    connectionAttempts = 0; // Reset retry counter on success
                     setPersonaState('idle', 'Ready');
                     // Now it's safe to start audio streaming
                     startRealtimeAudio();
@@ -570,7 +567,23 @@
                 
                 case 'error':
                     console.error('❌ Realtime API error:', message.error);
-                    setPersonaState('idle', 'Error occurred');
+                    
+                    // Handle server errors with retry logic
+                    if (message.error?.type === 'server_error' && connectionAttempts < maxRetries) {
+                        connectionAttempts++;
+                        console.log(`🔄 Retrying connection (${connectionAttempts}/${maxRetries}) in 2 seconds...`);
+                        setPersonaState('idle', `Retrying... (${connectionAttempts}/${maxRetries})`);
+                        
+                        setTimeout(() => {
+                            if (realtimeSocket) {
+                                realtimeSocket.close();
+                            }
+                            connectToRealtimeAPI();
+                        }, 2000);
+                    } else {
+                        setPersonaState('idle', 'Error occurred');
+                        connectionAttempts = 0;
+                    }
                     break;
             }
         }
