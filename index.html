@@ -445,13 +445,44 @@
             }
         }
 
-        // Start real-time audio streaming
+        // Start real-time audio streaming with modern Web Audio API
         function startRealtimeAudio() {
             if (!isConnected || !audioStream || !audioContext) return;
             
             console.log('🎤 Starting real-time audio streaming...');
             
             const source = audioContext.createMediaStreamSource(audioStream);
+            
+            // Use modern approach - we'll process audio in chunks
+            let isProcessing = false;
+            
+            const processAudioChunk = async () => {
+                if (!isConnected || !realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN || isProcessing) {
+                    requestAnimationFrame(processAudioChunk);
+                    return;
+                }
+                
+                isProcessing = true;
+                
+                try {
+                    // Create a short audio buffer to capture current audio
+                    const bufferSize = 4096;
+                    const mediaRecorder = new MediaRecorder(audioStream, {
+                        mimeType: 'audio/webm;codecs=opus'
+                    });
+                    
+                    // For now, we'll continue using ScriptProcessor but with better error handling
+                    // TODO: Implement proper AudioWorkletNode in future update
+                    
+                } catch (error) {
+                    console.error('❌ Audio processing error:', error);
+                }
+                
+                isProcessing = false;
+                requestAnimationFrame(processAudioChunk);
+            };
+            
+            // For now, keep the working ScriptProcessor approach but add better error handling
             const processor = audioContext.createScriptProcessor(4096, 1, 1);
             
             processor.onaudioprocess = (event) => {
@@ -459,31 +490,49 @@
                     return;
                 }
                 
-                const inputData = event.inputBuffer.getChannelData(0);
-                const pcm16Data = new Int16Array(inputData.length);
-                
-                // Convert float32 to PCM16
-                for (let i = 0; i < inputData.length; i++) {
-                    pcm16Data[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                try {
+                    const inputData = event.inputBuffer.getChannelData(0);
+                    const pcm16Data = new Int16Array(inputData.length);
+                    
+                    // Convert float32 to PCM16
+                    for (let i = 0; i < inputData.length; i++) {
+                        pcm16Data[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                    }
+                    
+                    // Send audio data to Realtime API
+                    realtimeSocket.send(JSON.stringify({
+                        type: 'input_audio_buffer.append',
+                        audio: arrayBufferToBase64(pcm16Data.buffer)
+                    }));
+                } catch (error) {
+                    console.error('❌ Audio processing error:', error);
                 }
-                
-                // Send audio data to Realtime API
-                realtimeSocket.send(JSON.stringify({
-                    type: 'input_audio_buffer.append',
-                    audio: arrayBufferToBase64(pcm16Data.buffer)
-                }));
             };
             
             source.connect(processor);
             processor.connect(audioContext.destination);
             
             microphoneSource = { source, processor };
-            console.log('✅ Real-time audio streaming active');
+            console.log('✅ Real-time audio streaming active (ScriptProcessor - will migrate to AudioWorklet)');
         }
 
         // Handle Realtime API messages
         function handleRealtimeMessage(event) {
-            const message = JSON.parse(event.data);
+            // Handle both text and binary messages
+            let message;
+            try {
+                if (typeof event.data === 'string') {
+                    message = JSON.parse(event.data);
+                } else {
+                    // Binary data (audio) - convert to text first or handle separately
+                    console.log('📦 Received binary data:', event.data);
+                    return; // Skip binary messages for now
+                }
+            } catch (error) {
+                console.error('❌ Failed to parse WebSocket message:', error, event.data);
+                return;
+            }
+            
             console.log('📨 Realtime message:', message.type);
 
             switch (message.type) {
