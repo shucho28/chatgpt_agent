@@ -356,7 +356,9 @@
         async function initializeAudio() {
             try {
                 console.log('🎤 Initializing audio...');
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 24000  // Match OpenAI Realtime API sample rate
+                });
                 audioStream = await navigator.mediaDevices.getUserMedia({ 
                     audio: {
                         sampleRate: 24000,
@@ -528,23 +530,15 @@
                     console.log('✅ Realtime session created');
                     connectionAttempts = 0; // Reset retry counter on success
                     
-                    // Send minimal session configuration - just voice settings
-                    console.log('🔧 Sending minimal session configuration...');
-                    realtimeSocket.send(JSON.stringify({
-                        type: 'session.update',
-                        session: {
-                            voice: 'alloy'
-                        }
-                    }));
-                    setPersonaState('idle', 'Setting voice...');
+                    // CRITICAL TEST: Don't send ANY session.update - use pure defaults
+                    console.log('🔧 Testing with NO session configuration - pure defaults');
+                    isSessionReady = true;
+                    setPersonaState('idle', 'Ready - Pure defaults');
+                    startRealtimeAudio();
                     break;
                 
                 case 'session.updated':
-                    console.log('✅ Session updated with minimal configuration');
-                    isSessionReady = true;
-                    setPersonaState('idle', 'Ready');
-                    // Now it's safe to start audio streaming
-                    startRealtimeAudio();
+                    console.log('✅ Session updated (not expected in this test)');
                     break;
                 
                 case 'input_audio_buffer.speech_started':
