@@ -52,21 +52,44 @@ wss.on('connection', (clientWs, req) => {
     const openaiWs = new WebSocket(openaiUrl, {
         headers: {
             'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'OpenAI-Beta': 'realtime=v1'
+            'OpenAI-Beta': 'realtime=v1',
+            'User-Agent': 'OpenAI-Realtime-Proxy/1.0.0'
         }
     });
     
     // Forward messages from client to OpenAI
     clientWs.on('message', (data) => {
-        if (openaiWs.readyState === WebSocket.OPEN) {
-            openaiWs.send(data);
+        try {
+            const message = JSON.parse(data);
+            console.log('📤 Client message:', message.type);
+            
+            if (openaiWs.readyState === WebSocket.OPEN) {
+                openaiWs.send(data);
+            } else {
+                console.log('⚠️ OpenAI WebSocket not ready, message queued');
+            }
+        } catch (error) {
+            console.log('📤 Client binary data:', data.length, 'bytes');
+            if (openaiWs.readyState === WebSocket.OPEN) {
+                openaiWs.send(data);
+            }
         }
     });
     
     // Forward messages from OpenAI to client
     openaiWs.on('message', (data) => {
-        if (clientWs.readyState === WebSocket.OPEN) {
-            clientWs.send(data);
+        try {
+            const message = JSON.parse(data);
+            console.log('📥 OpenAI message:', message.type);
+            
+            if (clientWs.readyState === WebSocket.OPEN) {
+                clientWs.send(data);
+            }
+        } catch (error) {
+            console.log('📥 OpenAI binary data:', data.length, 'bytes');
+            if (clientWs.readyState === WebSocket.OPEN) {
+                clientWs.send(data);
+            }
         }
     });
     
@@ -76,14 +99,38 @@ wss.on('connection', (clientWs, req) => {
     });
     
     openaiWs.on('error', (error) => {
-        console.error('❌ OpenAI WebSocket error:', error);
+        console.error('❌ OpenAI WebSocket error:', error.message);
+        console.error('❌ Error details:', error);
         if (clientWs.readyState === WebSocket.OPEN) {
             clientWs.close(1000, 'OpenAI connection error');
         }
     });
     
     openaiWs.on('close', (code, reason) => {
-        console.log('🔌 OpenAI WebSocket closed:', code, reason.toString());
+        const reasonText = reason.toString();
+        console.log('🔌 OpenAI WebSocket closed:', code, reasonText || '(no reason given)');
+        
+        // Log different close codes
+        switch (code) {
+            case 1000:
+                console.log('ℹ️ Normal closure - might be due to session config or API limits');
+                break;
+            case 1002:
+                console.log('❌ Protocol error - invalid WebSocket message');
+                break;
+            case 1003:
+                console.log('❌ Unsupported data - message format error');
+                break;
+            case 1008:
+                console.log('❌ Policy violation - likely authentication issue');
+                break;
+            case 1011:
+                console.log('❌ Server error - OpenAI internal issue');
+                break;
+            default:
+                console.log('❓ Unknown close code:', code);
+        }
+        
         if (clientWs.readyState === WebSocket.OPEN) {
             clientWs.close(code, reason);
         }
