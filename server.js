@@ -200,26 +200,30 @@ wss.on('connection', (clientWs, req) => {
             }
         });
         
-        console.log(`🔧 Sending ${sessionUpdates.length} queued session.update messages...`);
-        for (const sessionUpdate of sessionUpdates) {
-            try {
-                const parsed = JSON.parse(sessionUpdate);
-                console.log('🔧 Session config:', JSON.stringify(parsed.session, null, 2));
-            } catch (e) {
-                console.log('🔧 Raw session update:', sessionUpdate);
+        if (sessionUpdates.length > 0) {
+            console.log(`🔧 Sending ${sessionUpdates.length} queued session.update messages...`);
+            for (const sessionUpdate of sessionUpdates) {
+                try {
+                    const parsed = JSON.parse(sessionUpdate);
+                    console.log('🔧 Session config:', JSON.stringify(parsed.session, null, 2));
+                } catch (e) {
+                    console.log('🔧 Raw session update:', sessionUpdate);
+                }
+                openaiWs.send(sessionUpdate);
             }
-            openaiWs.send(sessionUpdate);
+            
+            // Remove session.update messages from queue
+            messageQueue = messageQueue.filter(msg => {
+                try {
+                    const parsed = JSON.parse(msg);
+                    return parsed.type !== 'session.update';
+                } catch {
+                    return true; // Keep binary messages
+                }
+            });
+        } else {
+            console.log('🔧 No session configuration sent - using OpenAI defaults');
         }
-        
-        // Remove session.update messages from queue
-        messageQueue = messageQueue.filter(msg => {
-            try {
-                const parsed = JSON.parse(msg);
-                return parsed.type !== 'session.update';
-            } catch {
-                return true; // Keep binary messages
-            }
-        });
     });
     
     openaiWs.on('error', (error) => {

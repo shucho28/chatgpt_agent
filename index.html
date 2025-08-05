@@ -387,19 +387,12 @@
                 realtimeSocket.onopen = () => {
                     console.log('✅ Connected to Realtime API');
                     
-                    // Configure the session with absolute minimal settings
-                    realtimeSocket.send(JSON.stringify({
-                        type: 'session.update',
-                        session: {
-                            modalities: ['audio'],
-                            instructions: 'You are a helpful assistant.',
-                            voice: 'alloy'
-                        }
-                    }));
+                    // Try using default session without any configuration
+                    console.log('🔧 Using default session configuration...');
                     
-                    setPersonaState('idle', 'Configuring session...');
+                    setPersonaState('idle', 'Waiting for session...');
                     isConnected = true;
-                    // Note: Don't start audio streaming yet - wait for session.created
+                    // Note: Don't send session.update - let OpenAI use defaults
 
                     // Show mode indicator
                     modeIndicator.classList.add('visible');
