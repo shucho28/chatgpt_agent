@@ -387,12 +387,20 @@
                 realtimeSocket.onopen = () => {
                     console.log('✅ Connected to Realtime API');
                     
-                    // Try using default session without any configuration
-                    console.log('🔧 Using default session configuration...');
+                    // Send minimal audio configuration after successful connection
+                    setTimeout(() => {
+                        console.log('🔧 Sending minimal audio configuration...');
+                        realtimeSocket.send(JSON.stringify({
+                            type: 'session.update',
+                            session: {
+                                input_audio_format: 'pcm16',
+                                output_audio_format: 'pcm16'
+                            }
+                        }));
+                    }, 1000); // Wait 1 second after connection
                     
-                    setPersonaState('idle', 'Waiting for session...');
+                    setPersonaState('idle', 'Configuring audio...');
                     isConnected = true;
-                    // Note: Don't send session.update - let OpenAI use defaults
 
                     // Show mode indicator
                     modeIndicator.classList.add('visible');
@@ -524,8 +532,13 @@
             switch (message.type) {
                 case 'session.created':
                     console.log('✅ Realtime session created');
-                    isSessionReady = true;
                     connectionAttempts = 0; // Reset retry counter on success
+                    // Don't start audio yet - wait for audio configuration
+                    break;
+                
+                case 'session.updated':
+                    console.log('✅ Session audio configuration updated');
+                    isSessionReady = true;
                     setPersonaState('idle', 'Ready');
                     // Now it's safe to start audio streaming
                     startRealtimeAudio();
