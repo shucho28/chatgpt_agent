@@ -303,6 +303,19 @@
         REALTIME API MODE
     </div>
     
+    <!-- Codespace Configuration (only shown when needed) -->
+    <div id="codespace-config" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 20px; border-radius: 10px; border: 1px solid #0ff; color: #0ff; font-family: 'Orbitron', monospace; z-index: 1000;">
+        <h3 style="margin-top: 0;">🔧 Codespace Configuration</h3>
+        <p>Enter your Codespace server URL:</p>
+        <input type="text" id="codespace-input" placeholder="https://your-name-3001.app.github.dev" 
+               style="width: 100%; padding: 8px; background: #1a1a2e; border: 1px solid #0ff; color: #0ff; border-radius: 4px;">
+        <div style="margin-top: 10px;">
+            <button onclick="saveCodespaceUrl()" style="background: #0ff; color: #000; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 10px;">Save</button>
+            <button onclick="hideCodespaceConfig()" style="background: #333; color: #0ff; border: 1px solid #0ff; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Cancel</button>
+        </div>
+        <p style="font-size: 12px; margin-bottom: 0;">💡 Find this URL in your Codespace browser tab</p>
+    </div>
+    
     <!-- Main Assistant Interface -->
     <div class="relative flex items-center justify-center w-full h-full">
         <div class="orb-container">
@@ -324,6 +337,73 @@
         const touchIndicator = document.querySelector('.touch-indicator');
         const modeIndicator = document.getElementById('mode-indicator');
 
+        // Codespace URL auto-detection
+        function detectCodespaceURL() {
+            // Try multiple detection methods
+            const methods = [
+                // Method 1: Check URL parameters
+                () => {
+                    const params = new URLSearchParams(window.location.search);
+                    const codespace = params.get('codespace') || params.get('server');
+                    if (codespace && codespace.includes('app.github.dev')) {
+                        return `wss://${codespace}/realtime`;
+                    }
+                    return null;
+                },
+                
+                // Method 2: Check localStorage for saved codespace
+                () => {
+                    try {
+                        const saved = localStorage.getItem('codespace_url');
+                        if (saved && saved.includes('app.github.dev')) {
+                            return saved;
+                        }
+                    } catch (e) {}
+                    return null;
+                },
+                
+                // Method 3: Check document referrer
+                () => {
+                    if (document.referrer && document.referrer.includes('app.github.dev')) {
+                        const match = document.referrer.match(/https:\/\/([^\/]+)/);
+                        if (match) {
+                            const domain = match[1].replace(/-\d+\.app\.github\.dev/, '-3001.app.github.dev');
+                            return `wss://${domain}/realtime`;
+                        }
+                    }
+                    return null;
+                },
+                
+                // Method 4: Check for saved user-provided URL
+                () => {
+                    const saved = localStorage.getItem('user_provided_codespace');
+                    if (saved) return saved;
+                    return null;
+                },
+                
+                // Method 5: Show config UI (as final fallback)
+                () => {
+                    showCodespaceConfig();
+                    return null; // Will be handled by the UI
+                }
+            ];
+            
+            // Try each method until one works
+            for (const method of methods) {
+                try {
+                    const result = method();
+                    if (result) {
+                        console.log('🔧 Codespace URL detected via method:', method.name || 'anonymous');
+                        return result;
+                    }
+                } catch (e) {
+                    console.warn('⚠️ Detection method failed:', e);
+                }
+            }
+            
+            return null;
+        }
+
         // Realtime API Configuration - Auto-detect environment
         const getProxyURL = () => {
             const hostname = window.location.hostname;
@@ -331,13 +411,24 @@
             
             // Production deployments
             if (hostname === 'shucho.space') {
-                // Use environment-specific URL - will need to be updated when server is deployed
-                return 'wss://openai-realtime-proxy.vercel.app/realtime';
+                const codespaceUrl = detectCodespaceURL();
+                if (codespaceUrl) {
+                    console.log('🔧 Using detected codespace:', codespaceUrl);
+                    return codespaceUrl;
+                }
+                
+                // Fallback to a prompt asking user
+                alert('⚠️ Could not auto-detect your Codespace URL.\nPlease make sure your server is running and refresh the page.');
+                return 'wss://your-codespace-3001.app.github.dev/realtime';
             }
             
             // GitHub Pages
             if (hostname.includes('github.io')) {
-                return 'wss://openai-realtime-proxy.vercel.app/realtime';
+                const codespaceUrl = detectCodespaceURL();
+                if (codespaceUrl) return codespaceUrl;
+                
+                // Fallback to detection
+                return 'wss://your-codespace-3001.app.github.dev/realtime';
             }
             
             // GitHub Codespaces (pattern: *.app.github.dev)
@@ -787,6 +878,40 @@
             }
         }
         
+        // Codespace configuration helpers
+        function showCodespaceConfig() {
+            document.getElementById('codespace-config').style.display = 'block';
+        }
+        
+        function hideCodespaceConfig() {
+            document.getElementById('codespace-config').style.display = 'none';
+        }
+        
+        function saveCodespaceUrl() {
+            const input = document.getElementById('codespace-input');
+            const url = input.value.trim();
+            
+            if (url && url.includes('app.github.dev')) {
+                const wsUrl = url.replace('https:', 'wss:') + '/realtime';
+                localStorage.setItem('user_provided_codespace', wsUrl);
+                localStorage.setItem('codespace_url', wsUrl);
+                hideCodespaceConfig();
+                
+                // Restart the connection with new URL
+                if (realtimeSocket) {
+                    realtimeSocket.close();
+                }
+                
+                setTimeout(() => {
+                    connectToRealtimeAPI();
+                }, 1000);
+                
+                console.log('✅ Saved codespace URL:', wsUrl);
+            } else {
+                alert('⚠️ Please enter a valid Codespace URL (format: https://name-3001.app.github.dev)');
+            }
+        }
+
         // Event listeners
         document.body.addEventListener('click', activateAssistant, { once: true });
         document.body.addEventListener('touchstart', activateAssistant, { once: true });
