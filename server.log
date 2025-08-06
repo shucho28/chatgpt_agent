@@ -1,0 +1,6 @@
+🔑 API Key format: sk-proj-Q92BZoKW8FFt...Zu0A
+🌐 OpenAI Realtime API Proxy running on port 3001
+📡 WebSocket endpoint: ws://localhost:3001/realtime
+🔧 HTTP interface: http://localhost:3001
+✅ API key valid and has Realtime API access
+🛑 Shutting down proxy server...

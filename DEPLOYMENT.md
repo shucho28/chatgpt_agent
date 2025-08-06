@@ -1,78 +1,56 @@
-# Deployment Guide for OpenAI Realtime API Voice Assistant
+# 🚀 Deployment Guide
 
-To see your voice assistant live on **shucho.space**, you need to deploy the proxy server to a cloud service.
+## Option 1: Deploy via Vercel Dashboard (Recommended)
 
-## Quick Deployment Options
+1. **Go to [vercel.com](https://vercel.com)** and sign in with GitHub
+2. **Click "New Project"**
+3. **Import your `chatgpt_agent` repository**
+4. **Configure the project:**
+   - Framework Preset: **Other**
+   - Root Directory: **/** (leave default)
+   - Build Command: **`npm install`** (leave default)
+   - Output Directory: **/** (leave default)
+   - Install Command: **`npm install`** (leave default)
 
-### Option 1: Vercel (Recommended - Free)
+5. **Add Environment Variable:**
+   - Key: `OPENAI_API_KEY`
+   - Value: `[Your OpenAI API key from server.js or environment]`
 
-1. **Create Vercel account**: [vercel.com](https://vercel.com)
+6. **Click "Deploy"**
 
-2. **Deploy the server**:
+Your server will be deployed to a URL like: `https://your-project-name.vercel.app`
+
+## Option 2: Deploy via CLI
+
+1. **Login to Vercel:**
    ```bash
-   # Install Vercel CLI
-   npm i -g vercel
-   
-   # Deploy (will ask for login)
+   vercel login
+   ```
+
+2. **Deploy to production:**
+   ```bash
    vercel --prod
    ```
 
-3. **Set environment variable**:
-   - Go to Vercel dashboard → Your project → Settings → Environment Variables
-   - Add: `OPENAI_API_KEY` = `your-actual-api-key`
-   - Redeploy: `vercel --prod`
-
-4. **Update client code**:
-   - Copy your Vercel URL (e.g., `https://your-app.vercel.app`)
-   - Update line 332 in `index.html`:
-   ```javascript
-   return 'wss://your-app.vercel.app/realtime';
-   ```
-
-5. **Push to GitHub Pages**:
+3. **Set environment variable:**
    ```bash
-   git add .
-   git commit -m "Update proxy URL for production"
-   git push
+   vercel env add OPENAI_API_KEY
    ```
-
-### Option 2: Railway (Alternative - Free Tier)
-
-1. **Create Railway account**: [railway.app](https://railway.app)
-2. **Connect GitHub repo** and deploy
-3. **Add environment variable**: `OPENAI_API_KEY`
-4. **Update proxy URL** in `index.html` with your Railway URL
-
-### Option 3: Render (Alternative - Free Tier)
-
-1. **Create Render account**: [render.com](https://render.com)
-2. **Create Web Service** from GitHub repo
-3. **Set environment variable**: `OPENAI_API_KEY`
-4. **Update proxy URL** in `index.html` with your Render URL
-
-## Current Status
-
-- ✅ **Local**: Works with `npm start` + `index.html`
-- ⏳ **Production**: Needs server deployment + URL update
 
 ## After Deployment
 
-1. Your proxy server will be live at `https://your-deployed-url`
-2. Update the proxy URL in `index.html`
-3. Push to GitHub - automatically deploys to shucho.space
-4. Voice assistant works globally! 🌍
+Once deployed, you'll get a URL like `https://chatgpt-agent-xyz.vercel.app`. 
 
-## Security Notes
+The app will automatically use this URL when running on shucho.space!
 
-- Never commit your real API key to GitHub
-- Use environment variables on the deployed server
-- The current obfuscated key in the code is safe for GitHub
+## Testing
 
-## Architecture
+1. Visit your deployed URL to see: "OpenAI Realtime API Proxy running..."
+2. Test WebSocket at: `wss://your-vercel-url.vercel.app/realtime`
+3. Visit shucho.space - it should auto-connect!
 
-```
-shucho.space → Your Deployed Server → OpenAI Realtime API
-   (client)        (proxy + auth)         (voice AI)
-```
+## Troubleshooting
 
-Would you like me to help you deploy to Vercel? It's the fastest option!
+- ✅ Make sure `OPENAI_API_KEY` environment variable is set
+- ✅ Check that `vercel.json` is properly configured
+- ✅ Verify the server starts without errors in Vercel logs

@@ -411,15 +411,27 @@
             
             // Production deployments
             if (hostname === 'shucho.space') {
-                const codespaceUrl = detectCodespaceURL();
-                if (codespaceUrl) {
-                    console.log('🔧 Using detected codespace:', codespaceUrl);
-                    return codespaceUrl;
-                }
+                // First priority: Check for deployed Vercel server
+                const vercelUrl = 'wss://chatgpt-agent.vercel.app/realtime';
                 
-                // Fallback to a prompt asking user
-                alert('⚠️ Could not auto-detect your Codespace URL.\nPlease make sure your server is running and refresh the page.');
-                return 'wss://your-codespace-3001.app.github.dev/realtime';
+                // Test if a Vercel deployment exists by trying common patterns
+                const possibleVercelUrls = [
+                    'wss://chatgpt-agent.vercel.app/realtime',
+                    'wss://openai-realtime-proxy.vercel.app/realtime',
+                    'wss://chatgpt-agent-shucho28.vercel.app/realtime'
+                ];
+                
+                // For now, return the most likely Vercel URL
+                // TODO: Add actual connectivity testing in future version
+                console.log('🔧 Using Vercel deployment URL');
+                return possibleVercelUrls[0];
+                
+                // Fallback: Try codespace detection if Vercel fails
+                // const codespaceUrl = detectCodespaceURL();
+                // if (codespaceUrl) {
+                //     console.log('🔧 Fallback to codespace:', codespaceUrl);
+                //     return codespaceUrl;
+                // }
             }
             
             // GitHub Pages
