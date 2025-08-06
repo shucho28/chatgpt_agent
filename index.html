@@ -326,11 +326,41 @@
 
         // Realtime API Configuration - Auto-detect environment
         const getProxyURL = () => {
-            // Check if we're on GitHub Pages (shucho.space)
-            if (window.location.hostname === 'shucho.space' || window.location.hostname.includes('github.io')) {
-                // GitHub Codespace URL - Fixed for current deployment
-                return 'wss://laughing-train-g4pxx5r5rg739667-3001.app.github.dev/realtime';
+            const hostname = window.location.hostname;
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            
+            // Production deployments
+            if (hostname === 'shucho.space') {
+                // Use environment-specific URL - will need to be updated when server is deployed
+                return 'wss://openai-realtime-proxy.vercel.app/realtime';
             }
+            
+            // GitHub Pages
+            if (hostname.includes('github.io')) {
+                return 'wss://openai-realtime-proxy.vercel.app/realtime';
+            }
+            
+            // GitHub Codespaces (pattern: *.app.github.dev)
+            if (hostname.includes('app.github.dev')) {
+                // Use current codespace but port 3001
+                return `wss://${hostname.replace(/(-\d+)?\.app\.github\.dev/, '-3001.app.github.dev')}/realtime`;
+            }
+            
+            // Vercel deployments
+            if (hostname.includes('vercel.app')) {
+                return `${protocol}//${hostname}/realtime`;
+            }
+            
+            // Railway deployments
+            if (hostname.includes('railway.app')) {
+                return `${protocol}//${hostname}/realtime`;
+            }
+            
+            // Render deployments
+            if (hostname.includes('onrender.com')) {
+                return `${protocol}//${hostname}/realtime`;
+            }
+            
             // Local development
             return 'ws://localhost:3001/realtime';
         };
@@ -338,6 +368,10 @@
         const PROXY_URL = getProxyURL();
         const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-10-01';
         
+        console.log('🔧 Environment detection:');
+        console.log('   Hostname:', window.location.hostname);
+        console.log('   Protocol:', window.location.protocol);
+        console.log('   Full URL:', window.location.href);
         console.log('🔧 Using proxy URL:', PROXY_URL);
         
         // State variables
@@ -406,8 +440,15 @@
                 
                 realtimeSocket.onerror = (error) => {
                     console.error('❌ Realtime WebSocket error:', error);
-                    if (PROXY_URL.includes('your-proxy-server')) {
-                        setPersonaState('idle', 'Server not deployed yet');
+                    console.error('❌ Attempted URL:', PROXY_URL);
+                    
+                    // Provide specific error messages based on URL
+                    if (PROXY_URL.includes('vercel.app') || PROXY_URL.includes('railway.app') || PROXY_URL.includes('onrender.com')) {
+                        setPersonaState('idle', 'Server deployment needed');
+                    } else if (PROXY_URL.includes('app.github.dev')) {
+                        setPersonaState('idle', 'Codespace server offline');
+                    } else if (PROXY_URL.includes('localhost')) {
+                        setPersonaState('idle', 'Local server not running');
                     } else {
                         setPersonaState('idle', 'Connection failed');
                     }
@@ -415,11 +456,17 @@
                 
                 realtimeSocket.onclose = (event) => {
                     console.log('🔌 Realtime WebSocket closed:', event.code, event.reason);
-                    if (PROXY_URL.includes('your-proxy-server')) {
-                        setPersonaState('idle', 'Deploy server first');
+                    console.log('🔌 Connection URL was:', PROXY_URL);
+                    
+                    // Provide helpful error messages based on close code and URL
+                    if (event.code === 1006) {
+                        setPersonaState('idle', 'Server unreachable');
+                    } else if (event.code === 1000) {
+                        setPersonaState('idle', 'Connection closed');
                     } else {
                         setPersonaState('idle', 'Disconnected');
                     }
+                    
                     isConnected = false;
                 };
                 
@@ -480,20 +527,25 @@
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
                     
-                    // Use default format (likely g711_ulaw) since we don't configure audio format
-                    const ulawData = new Uint8Array(inputData.length);
+                    // Convert to PCM16 format (as expected by OpenAI default session)
+                    const pcm16Data = new Int16Array(inputData.length);
                     
                     for (let i = 0; i < inputData.length; i++) {
-                        // Convert float32 to PCM16 first, then to μ-law
-                        const pcm16 = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-                        ulawData[i] = linearToUlaw(pcm16);
+                        // Convert float32 (-1.0 to 1.0) to PCM16 (-32768 to 32767)
+                        pcm16Data[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
                     }
                     
-                    // Send audio data in default format
-                    realtimeSocket.send(JSON.stringify({
+                    // Send audio data in PCM16 format as expected by OpenAI
+                    const audioMessage = JSON.stringify({
                         type: 'input_audio_buffer.append',
-                        audio: arrayBufferToBase64(ulawData.buffer)
-                    }));
+                        audio: arrayBufferToBase64(pcm16Data.buffer)
+                    });
+                    realtimeSocket.send(audioMessage);
+                    
+                    // Log audio data being sent (only occasionally to avoid spam)
+                    if (Math.random() < 0.001) { // Log ~0.1% of audio chunks
+                        console.log('📤 Sent audio chunk:', pcm16Data.length, 'samples');
+                    }
                 } catch (error) {
                     console.error('❌ Audio processing error:', error);
                 }
@@ -531,9 +583,9 @@
                     connectionAttempts = 0; // Reset retry counter on success
                     
                     // CRITICAL TEST: Don't send ANY session.update - use pure defaults
-                    console.log('🔧 Testing with NO session configuration - pure defaults');
+                    console.log('🔧 Using OpenAI defaults: PCM16 audio, alloy voice, server VAD');
                     isSessionReady = true;
-                    setPersonaState('idle', 'Ready - Pure defaults');
+                    setPersonaState('idle', 'Ready - PCM16 format');
                     startRealtimeAudio();
                     break;
                 
@@ -542,12 +594,12 @@
                     break;
                 
                 case 'input_audio_buffer.speech_started':
-                    console.log('🎤 Speech started');
+                    console.log('🎤 Speech started - VAD detected audio');
                     setPersonaState('listening', 'Listening...');
                     break;
                 
                 case 'input_audio_buffer.speech_stopped':
-                    console.log('🎤 Speech stopped');
+                    console.log('🎤 Speech stopped - processing speech');
                     setPersonaState('thinking', 'Processing...');
                     break;
                 
@@ -619,20 +671,15 @@
             try {
                 const audioData = base64ToArrayBuffer(base64Audio);
                 
-                // Decode from default format (likely g711_ulaw)
-                const ulawBytes = new Uint8Array(audioData);
-                const pcmData = new Int16Array(ulawBytes.length);
+                // Decode from PCM16 format (as provided by OpenAI default session)
+                const pcmData = new Int16Array(audioData);
                 
-                for (let i = 0; i < ulawBytes.length; i++) {
-                    pcmData[i] = ulawToLinear(ulawBytes[i]);
-                }
-                
-                // Create audio buffer from decoded PCM data
+                // Create audio buffer from PCM16 data
                 const audioBuffer = audioContext.createBuffer(1, pcmData.length, 24000);
                 const channelData = audioBuffer.getChannelData(0);
                 
                 for (let i = 0; i < pcmData.length; i++) {
-                    channelData[i] = pcmData[i] / 32768; // Convert to float32
+                    channelData[i] = pcmData[i] / 32768; // Convert PCM16 to float32
                 }
                 
                 const source = audioContext.createBufferSource();
