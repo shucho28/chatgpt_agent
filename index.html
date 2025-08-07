@@ -481,6 +481,12 @@
         let maxRetries = 3;
         let preventClose = false; // Flag to prevent accidental closure
         let sessionStartTime = 0; // Track when session was created
+        
+        // Multi-tier voice system
+        let voiceMode = 'realtime'; // 'realtime', 'webspeech', 'text'
+        let recognition = null; // Web Speech API recognition
+        let realtimeFailures = 0;
+        let maxRealtimeFailures = 2;
 
         // Initialize audio context and microphone
         async function initializeAudio() {
@@ -865,11 +871,33 @@
                 
                 case 'error':
                     console.error('❌ Realtime API error:', message.error);
+                    realtimeFailures++;
+                    
+                    // If we've had too many realtime failures, fallback to Web Speech API
+                    if (realtimeFailures >= maxRealtimeFailures) {
+                        console.log('🔄 Too many Realtime API failures, switching to Web Speech API');
+                        voiceMode = 'webspeech';
+                        
+                        if (realtimeSocket) {
+                            realtimeSocket.close();
+                        }
+                        
+                        // Reset activation state and try Web Speech API
+                        isActivated = false;
+                        isConnected = false;
+                        isSessionReady = false;
+                        
+                        setTimeout(() => {
+                            activateAssistant(); // Will try Web Speech API
+                        }, 1000);
+                        
+                        return;
+                    }
                     
                     // Handle server errors with exponential backoff retry logic
                     if (message.error?.type === 'server_error' && connectionAttempts < maxRetries) {
                         connectionAttempts++;
-                        const delay = Math.min(1000 * Math.pow(2, connectionAttempts - 1), 10000); // Exponential backoff, max 10s
+                        const delay = Math.min(1000 * Math.pow(2, connectionAttempts - 1), 10000);
                         console.log(`🔄 OpenAI server error - retrying (${connectionAttempts}/${maxRetries}) in ${delay/1000}s...`);
                         setPersonaState('idle', `Retrying... (${connectionAttempts}/${maxRetries})`);
                         
@@ -877,22 +905,23 @@
                             if (realtimeSocket) {
                                 realtimeSocket.close();
                             }
-                            // Reset session state before reconnecting
                             isSessionReady = false;
                             isConnected = false;
                             connectToRealtimeAPI();
                         }, delay);
                     } else {
-                        setPersonaState('idle', 'OpenAI server error - try again');
-                        connectionAttempts = 0;
+                        // Too many retries, fallback to next tier
+                        console.log('🔄 Max retries reached, falling back to Web Speech API');
+                        realtimeFailures = maxRealtimeFailures; // Force fallback
+                        voiceMode = 'webspeech';
                         
-                        // Allow user to retry manually after server errors
+                        isActivated = false;
+                        isConnected = false;
+                        isSessionReady = false;
+                        
                         setTimeout(() => {
-                            isActivated = false;
-                            setPersonaState('idle', 'TAP TO RETRY');
-                            touchIndicator.style.display = 'block';
-                            touchIndicator.textContent = 'TAP TO RETRY';
-                        }, 3000);
+                            activateAssistant();
+                        }, 1000);
                     }
                     break;
             }
@@ -1021,7 +1050,126 @@
             }
         }
 
-        // Activation handler
+        // Initialize Web Speech API as fallback
+        function initializeWebSpeech() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                console.log('❌ Web Speech API not supported');
+                return false;
+            }
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+            recognition.maxAlternatives = 1;
+            
+            recognition.onstart = () => {
+                console.log('🎤 Web Speech API listening started');
+                setPersonaState('listening', 'Listening (Web Speech)');
+            };
+            
+            recognition.onresult = (event) => {
+                let finalTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    }
+                }
+                
+                if (finalTranscript.trim()) {
+                    console.log('🗣️ Speech recognized:', finalTranscript);
+                    handleSpeechInput(finalTranscript.trim());
+                }
+            };
+            
+            recognition.onerror = (event) => {
+                console.error('❌ Web Speech API error:', event.error);
+                if (event.error === 'no-speech') {
+                    setTimeout(() => recognition.start(), 1000);
+                } else {
+                    setPersonaState('idle', 'Speech error - tap to retry');
+                    setTimeout(() => {
+                        isActivated = false;
+                        showRetryButton();
+                    }, 2000);
+                }
+            };
+            
+            recognition.onend = () => {
+                console.log('🔇 Web Speech API ended');
+                if (voiceMode === 'webspeech' && isActivated) {
+                    setTimeout(() => recognition.start(), 100); // Restart automatically
+                }
+            };
+            
+            console.log('✅ Web Speech API initialized');
+            return true;
+        }
+        
+        // Handle speech input from Web Speech API
+        async function handleSpeechInput(text) {
+            setPersonaState('thinking', 'Processing...');
+            
+            try {
+                // Send to OpenAI Chat API instead of Realtime API
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+                
+                if (!response.ok) throw new Error('Chat API failed');
+                
+                const data = await response.json();
+                
+                // Use browser's speech synthesis for response
+                speakResponse(data.response);
+                
+            } catch (error) {
+                console.error('❌ Chat API error:', error);
+                setPersonaState('idle', 'Error - tap to retry');
+                setTimeout(() => {
+                    isActivated = false;
+                    showRetryButton();
+                }, 2000);
+            }
+        }
+        
+        // Use Web Speech Synthesis for responses
+        function speakResponse(text) {
+            if ('speechSynthesis' in window) {
+                setPersonaState('speaking', 'Speaking...');
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.voice = speechSynthesis.getVoices().find(voice => 
+                    voice.name.includes('Alloy') || voice.name.includes('Female') || voice.default
+                );
+                utterance.rate = 1.1;
+                utterance.pitch = 1.0;
+                
+                utterance.onend = () => {
+                    setPersonaState('idle', 'Ready');
+                };
+                
+                speechSynthesis.speak(utterance);
+            } else {
+                // Fallback to text display
+                statusText.textContent = text.substring(0, 50) + '...';
+                setTimeout(() => setPersonaState('idle', 'Ready'), 3000);
+            }
+        }
+        
+        // Show retry button for user interaction
+        function showRetryButton() {
+            setPersonaState('idle', 'TAP TO RETRY');
+            touchIndicator.style.display = 'block';
+            touchIndicator.textContent = 'TAP TO RETRY';
+            touchIndicator.classList.add('pulse-hint');
+        }
+
+        // Smart activation handler with fallback tiers
         async function activateAssistant() {
             if (!isActivated) {
                 isActivated = true;
@@ -1030,16 +1178,73 @@
                 
                 setPersonaState('idle', 'INITIALIZING...');
                 
-                const audioInitialized = await initializeAudio();
-                if (audioInitialized) {
-                    await connectToRealtimeAPI();
-                    setTimeout(() => {
-                        touchIndicator.style.display = 'none';
-                    }, 2000);
-                } else {
-                    setPersonaState('idle', 'MICROPHONE ERROR');
+                // Try Tier 1: OpenAI Realtime API
+                if (voiceMode === 'realtime' && realtimeFailures < maxRealtimeFailures) {
+                    console.log('🎯 Attempting Tier 1: OpenAI Realtime API');
+                    const audioInitialized = await initializeAudio();
+                    if (audioInitialized) {
+                        await connectToRealtimeAPI();
+                        setTimeout(() => {
+                            touchIndicator.style.display = 'none';
+                        }, 2000);
+                        return;
+                    }
                 }
+                
+                // Try Tier 2: Web Speech API + Chat API
+                if (voiceMode !== 'text') {
+                    console.log('🎯 Falling back to Tier 2: Web Speech API');
+                    voiceMode = 'webspeech';
+                    const speechInitialized = initializeWebSpeech();
+                    if (speechInitialized) {
+                        recognition.start();
+                        setTimeout(() => {
+                            touchIndicator.style.display = 'none';
+                        }, 2000);
+                        return;
+                    }
+                }
+                
+                // Tier 3: Text-only mode
+                console.log('🎯 Falling back to Tier 3: Text-only mode');
+                voiceMode = 'text';
+                setPersonaState('idle', 'Text mode - type to chat');
+                initializeTextMode();
             }
+        }
+        
+        // Initialize text-only chat interface
+        function initializeTextMode() {
+            // Add a simple text input overlay
+            const textInput = document.createElement('input');
+            textInput.type = 'text';
+            textInput.placeholder = 'Type your message...';
+            textInput.style.cssText = `
+                position: fixed; 
+                bottom: 20px; 
+                left: 50%; 
+                transform: translateX(-50%);
+                padding: 12px;
+                background: rgba(26, 26, 46, 0.9);
+                border: 1px solid rgba(0, 255, 255, 0.5);
+                border-radius: 8px;
+                color: #0ff;
+                font-family: 'Orbitron', monospace;
+                width: 300px;
+                z-index: 1000;
+            `;
+            
+            textInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && textInput.value.trim()) {
+                    handleSpeechInput(textInput.value.trim());
+                    textInput.value = '';
+                }
+            });
+            
+            document.body.appendChild(textInput);
+            textInput.focus();
+            
+            touchIndicator.style.display = 'none';
         }
         
         // Codespace configuration helpers
