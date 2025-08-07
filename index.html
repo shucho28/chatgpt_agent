@@ -411,14 +411,11 @@
             
             // Production deployments
             if (hostname === 'shucho.space') {
-                // First priority: Check for deployed Vercel server
-                const vercelUrl = 'wss://chatgpt-agent.vercel.app/realtime';
+                // Use Railway deployment (supports WebSockets natively)
+                const railwayUrl = 'wss://openai-realtime-proxy-production-710a.up.railway.app/realtime';
                 
-                // Use the latest deployed Vercel URL
-                const deployedVercelUrl = 'wss://chatgpt-agent-btb61s5a0-shubhams-projects-56953eb9.vercel.app/realtime';
-                
-                console.log('🔧 Using deployed Vercel server');
-                return deployedVercelUrl;
+                console.log('🔧 Using Railway deployment (WebSocket compatible)');
+                return railwayUrl;
                 
                 // Fallback: Try codespace detection if Vercel fails
                 // const codespaceUrl = detectCodespaceURL();
