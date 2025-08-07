@@ -4,16 +4,28 @@ const url = require('url');
 
 // Configuration
 const PORT = process.env.PORT || 3001;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'sk-proj-Q92BZoKW8FFt64BEyCdmYHXhdgGUW3IMVaczGcyH2msdCO8wRy8wgTvzva0W8hRFvSjt78rofH' + 'T3BlbkFJ6JC26IgbYCyNKZOCjTIVvNyx8Zx4fAkiGHrPOtxHErFCc1Ue8tdDJjs7klYAGg9zR5EparZu0A';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const MAX_CONNECTIONS = process.env.MAX_CONNECTIONS || 10;
+const CONNECTION_TIMEOUT = process.env.CONNECTION_TIMEOUT || 30000;
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_REQUESTS_PER_WINDOW = 100;
+
+// Rate limiting and connection tracking
+const connectionTracker = new Map();
+const rateLimiter = new Map();
+let activeConnections = 0;
 
 // Validate API key
 if (!OPENAI_API_KEY || !OPENAI_API_KEY.startsWith('sk-')) {
     console.error('❌ Invalid or missing OpenAI API key');
-    console.error('💡 Set OPENAI_API_KEY environment variable or update server.js');
+    console.error('💡 Set OPENAI_API_KEY environment variable');
+    console.error('💡 Example: export OPENAI_API_KEY="sk-your-key-here"');
     process.exit(1);
 }
 
-console.log('🔑 API Key format:', OPENAI_API_KEY.substring(0, 20) + '...' + OPENAI_API_KEY.substring(OPENAI_API_KEY.length - 4));
+// Security: Never log the full API key
+console.log('🔑 API Key loaded:', OPENAI_API_KEY.substring(0, 10) + '...' + OPENAI_API_KEY.substring(OPENAI_API_KEY.length - 4));
+
 
 // Test API key with a simple request
 async function testAPIKey() {
@@ -77,8 +89,76 @@ const wss = new WebSocket.Server({
     path: '/realtime'
 });
 
+// Rate limiting middleware
+function checkRateLimit(clientIP) {
+    const now = Date.now();
+    const clientKey = clientIP;
+    
+    if (!rateLimiter.has(clientKey)) {
+        rateLimiter.set(clientKey, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+        return true;
+    }
+    
+    const clientData = rateLimiter.get(clientKey);
+    
+    if (now > clientData.resetTime) {
+        rateLimiter.set(clientKey, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+        return true;
+    }
+    
+    if (clientData.count >= MAX_REQUESTS_PER_WINDOW) {
+        return false;
+    }
+    
+    clientData.count++;
+    return true;
+}
+
+// Connection cleanup function
+function cleanupConnection(clientId) {
+    if (connectionTracker.has(clientId)) {
+        const connInfo = connectionTracker.get(clientId);
+        if (connInfo.timeout) {
+            clearTimeout(connInfo.timeout);
+        }
+        connectionTracker.delete(clientId);
+        activeConnections--;
+    }
+}
+
 wss.on('connection', (clientWs, req) => {
-    console.log('🔗 Client connected to proxy');
+    const clientIP = req.socket.remoteAddress;
+    const clientId = `${clientIP}:${Date.now()}:${Math.random()}`;
+    
+    console.log('🔗 Client connected:', clientId);
+    
+    // Rate limiting check
+    if (!checkRateLimit(clientIP)) {
+        console.log('❌ Rate limit exceeded for client:', clientIP);
+        clientWs.close(1008, 'Rate limit exceeded');
+        return;
+    }
+    
+    // Connection limit check
+    if (activeConnections >= MAX_CONNECTIONS) {
+        console.log('❌ Connection limit reached:', activeConnections);
+        clientWs.close(1013, 'Server overloaded');
+        return;
+    }
+    
+    activeConnections++;
+    
+    // Set connection timeout
+    const connectionTimeout = setTimeout(() => {
+        console.log('⏰ Connection timeout for client:', clientId);
+        clientWs.close(1000, 'Connection timeout');
+    }, CONNECTION_TIMEOUT);
+    
+    connectionTracker.set(clientId, {
+        startTime: Date.now(),
+        timeout: connectionTimeout,
+        ip: clientIP
+    });
     
     // Parse query parameters for model
     const query = url.parse(req.url, true).query;
@@ -275,14 +355,16 @@ wss.on('connection', (clientWs, req) => {
     
     // Handle client disconnection
     clientWs.on('close', (code, reason) => {
-        console.log('👋 Client disconnected:', code, reason.toString());
+        console.log('👋 Client disconnected:', clientId, code, reason.toString());
+        cleanupConnection(clientId);
         if (openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.close();
         }
     });
     
     clientWs.on('error', (error) => {
-        console.error('❌ Client WebSocket error:', error);
+        console.error('❌ Client WebSocket error:', clientId, error.message);
+        cleanupConnection(clientId);
         if (openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.close();
         }

@@ -478,7 +478,7 @@
             SESSION_READY_DELAY: 1000,    // Wait before sending audio
         };
         
-        // State variables - Enterprise Grade
+        // State variables - Enterprise Grade with Memory Management
         let realtimeSocket = null;
         let audioStream = null;
         let audioContext = null;
@@ -492,6 +492,72 @@
         let lastAudioSendTime = 0;
         let connectionAttempts = 0;
         let maxRetries = 5;
+        let memoryCleanupInterval = null;
+        let heartbeatInterval = null;
+        let preventClose = false;
+        
+        // Memory management configuration
+        const MEMORY_MANAGEMENT = {
+            MAX_BUFFER_SIZE: 48000, // 2 seconds at 24kHz
+            CLEANUP_INTERVAL: 30000, // 30 seconds
+            MAX_RESPONSE_QUEUE: 20,  // Max queued audio responses
+            HEARTBEAT_INTERVAL: 10000 // 10 seconds
+        };
+
+        // Memory cleanup function
+        function performMemoryCleanup() {
+            try {
+                // Clean up audio buffer if too large
+                if (audioBuffer.length > MEMORY_MANAGEMENT.MAX_BUFFER_SIZE) {
+                    console.log('🧹 Cleaning up oversized audio buffer:', audioBuffer.length, 'samples');
+                    audioBuffer = audioBuffer.slice(-MEMORY_MANAGEMENT.MAX_BUFFER_SIZE);
+                }
+                
+                // Clean up response queue if too large
+                if (audioResponseQueue.length > MEMORY_MANAGEMENT.MAX_RESPONSE_QUEUE) {
+                    console.log('🧹 Cleaning up response queue:', audioResponseQueue.length, 'items');
+                    audioResponseQueue = audioResponseQueue.slice(-MEMORY_MANAGEMENT.MAX_RESPONSE_QUEUE);
+                }
+                
+                // Force garbage collection if available
+                if (window.gc) {
+                    window.gc();
+                }
+                
+                console.log('🧹 Memory cleanup completed');
+            } catch (error) {
+                console.warn('⚠️ Memory cleanup error:', error);
+            }
+        }
+        
+        // Start memory management
+        function startMemoryManagement() {
+            if (memoryCleanupInterval) clearInterval(memoryCleanupInterval);
+            memoryCleanupInterval = setInterval(performMemoryCleanup, MEMORY_MANAGEMENT.CLEANUP_INTERVAL);
+            
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            heartbeatInterval = setInterval(() => {
+                if (isConnected && realtimeSocket && realtimeSocket.readyState === WebSocket.OPEN) {
+                    console.log('💓 Connection heartbeat - Status: OK');
+                } else if (isActivated) {
+                    console.warn('💓 Connection heartbeat - Status: DISCONNECTED');
+                    // Attempt reconnection if we were activated
+                    connectToRealtimeAPI();
+                }
+            }, MEMORY_MANAGEMENT.HEARTBEAT_INTERVAL);
+        }
+        
+        // Stop memory management
+        function stopMemoryManagement() {
+            if (memoryCleanupInterval) {
+                clearInterval(memoryCleanupInterval);
+                memoryCleanupInterval = null;
+            }
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+        }
 
         // Professional Audio Initialization - Industry Standard
         async function initializeAudio() {
@@ -526,6 +592,10 @@
                 
                 console.log('✅ Professional audio system initialized');
                 console.log(`📊 Stream settings: ${audioStream.getAudioTracks()[0].getSettings().sampleRate}Hz`);
+                
+                // Start memory management
+                startMemoryManagement();
+                
                 return true;
                 
             } catch (error) {
@@ -564,6 +634,7 @@
                     setPersonaState('idle', 'Connected, waiting for session...');
                     isConnected = true;
                     preventClose = true; // Prevent accidental closure
+                    connectionAttempts = 0; // Reset on successful connection
 
                     // Show mode indicator
                     modeIndicator.classList.add('visible');
@@ -613,21 +684,49 @@
                     console.log('🔌 Realtime WebSocket closed:', event.code, event.reason);
                     console.log('🔌 Connection URL was:', PROXY_URL);
                     console.log('🔌 isSessionReady was:', isSessionReady);
-                    console.log('🔌 Close triggered by:', new Error().stack);
                     
-                    // Provide helpful error messages based on close code and URL
+                    // Clean up resources
+                    isConnected = false;
+                    isSessionReady = false;
+                    preventClose = false;
+                    
+                    // Clean up audio processing
+                    if (audioProcessor) {
+                        try {
+                            audioProcessor.disconnect();
+                            audioProcessor = null;
+                        } catch (e) {
+                            console.warn('⚠️ Error disconnecting audio processor:', e);
+                        }
+                    }
+                    
+                    // Clean up buffers
+                    audioBuffer = [];
+                    audioResponseQueue = [];
+                    
+                    // Provide helpful error messages based on close code
                     if (event.code === 1001) {
                         console.error('❌ Client initiated close - investigating cause');
                         setPersonaState('idle', 'Connection terminated unexpectedly');
                     } else if (event.code === 1006) {
                         setPersonaState('idle', 'Server unreachable');
+                        // Attempt auto-reconnect for network issues
+                        if (isActivated && connectionAttempts < maxRetries) {
+                            setTimeout(() => {
+                                connectionAttempts++;
+                                console.log(`🔄 Auto-reconnecting (${connectionAttempts}/${maxRetries})...`);
+                                connectToRealtimeAPI();
+                            }, 2000 * connectionAttempts);
+                        }
+                    } else if (event.code === 1008) {
+                        setPersonaState('idle', 'Rate limited - please wait');
+                    } else if (event.code === 1013) {
+                        setPersonaState('idle', 'Server overloaded - try again later');
                     } else if (event.code === 1000) {
                         setPersonaState('idle', 'Connection closed');
                     } else {
                         setPersonaState('idle', 'Disconnected');
                     }
-                    
-                    isConnected = false;
                 };
                 
             } catch (error) {
@@ -818,9 +917,10 @@
             }
         }
 
-        // Professional Audio Response Playback
+        // Professional Audio Response Playback with Memory Management
         let audioResponseQueue = [];
         let isPlayingResponse = false;
+        let audioSources = []; // Track audio sources for cleanup
         
         async function processAudioResponseQueue() {
             if (audioResponseQueue.length === 0) {
@@ -852,11 +952,31 @@
                 source.buffer = audioBuffer;
                 source.connect(audioContext.destination);
                 
+                // Track audio sources for cleanup
+                audioSources.push(source);
+                
                 source.onended = () => {
+                    // Remove from tracking
+                    const index = audioSources.indexOf(source);
+                    if (index > -1) {
+                        audioSources.splice(index, 1);
+                    }
                     processAudioResponseQueue();
                 };
                 
                 source.start();
+                
+                // Cleanup old sources
+                if (audioSources.length > 5) {
+                    const oldSources = audioSources.splice(0, audioSources.length - 5);
+                    oldSources.forEach(oldSource => {
+                        try {
+                            oldSource.stop();
+                        } catch (e) {
+                            // Source already stopped
+                        }
+                    });
+                }
                 
             } catch (error) {
                 console.error('❌ Audio response playback error:', error);
@@ -1161,11 +1281,80 @@
             }
         }
 
+        // Cleanup function for page unload
+        function cleanupResources() {
+            console.log('🧹 Cleaning up resources...');
+            
+            // Stop memory management
+            stopMemoryManagement();
+            
+            // Close WebSocket connections
+            if (realtimeSocket && realtimeSocket.readyState === WebSocket.OPEN) {
+                realtimeSocket.close(1000, 'Page unload');
+            }
+            
+            // Stop audio stream
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Disconnect audio processing
+            if (audioProcessor) {
+                try {
+                    audioProcessor.disconnect();
+                } catch (e) {
+                    // Already disconnected
+                }
+            }
+            
+            // Stop all audio sources
+            audioSources.forEach(source => {
+                try {
+                    source.stop();
+                } catch (e) {
+                    // Already stopped
+                }
+            });
+            
+            // Close audio context
+            if (audioContext && audioContext.state !== 'closed') {
+                try {
+                    audioContext.close();
+                } catch (e) {
+                    // Already closed or closing
+                }
+            }
+            
+            // Clear all buffers
+            audioBuffer = [];
+            audioResponseQueue = [];
+            audioSources = [];
+            
+            console.log('✅ Resource cleanup completed');
+        }
+
         // Event listeners
         document.body.addEventListener('click', activateAssistant, { once: true });
         document.body.addEventListener('touchstart', activateAssistant, { once: true });
         personaOrb.addEventListener('click', activateAssistant);
         personaOrb.addEventListener('touchstart', activateAssistant);
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', cleanupResources);
+        window.addEventListener('unload', cleanupResources);
+        
+        // Visibility API for better resource management
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                console.log('📱 Page hidden - reducing resource usage');
+                // Temporarily pause audio processing if page is hidden
+                if (audioProcessor && isConnected) {
+                    // Could implement pause logic here
+                }
+            } else {
+                console.log('📱 Page visible - resuming normal operation');
+            }
+        });
 
     </script>
 </body>
