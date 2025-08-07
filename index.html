@@ -479,6 +479,7 @@
         let isSpeaking = false;
         let connectionAttempts = 0;
         let maxRetries = 3;
+        let preventClose = false; // Flag to prevent accidental closure
 
         // Initialize audio context and microphone
         async function initializeAudio() {
@@ -514,12 +515,26 @@
                 const wsUrl = `${PROXY_URL}?model=${REALTIME_MODEL}`;
                 realtimeSocket = new WebSocket(wsUrl);
                 
+                // Override close method to track what's calling it
+                const originalClose = realtimeSocket.close.bind(realtimeSocket);
+                realtimeSocket.close = function(code, reason) {
+                    console.error('⚠️ WebSocket.close() called!');
+                    console.error('⚠️ Call stack:', new Error().stack);
+                    console.error('⚠️ Code:', code, 'Reason:', reason);
+                    if (!preventClose) {
+                        return originalClose(code, reason);
+                    } else {
+                        console.log('🛡️ Close prevented by preventClose flag');
+                    }
+                };
+                
                 realtimeSocket.onopen = () => {
                     console.log('✅ Connected to Realtime API proxy');
                     console.log('🔧 Keeping connection alive, waiting for session.created...');
                     
                     setPersonaState('idle', 'Connected, waiting for session...');
                     isConnected = true;
+                    preventClose = true; // Prevent accidental closure
 
                     // Show mode indicator
                     modeIndicator.classList.add('visible');
@@ -568,9 +583,14 @@
                 realtimeSocket.onclose = (event) => {
                     console.log('🔌 Realtime WebSocket closed:', event.code, event.reason);
                     console.log('🔌 Connection URL was:', PROXY_URL);
+                    console.log('🔌 isSessionReady was:', isSessionReady);
+                    console.log('🔌 Close triggered by:', new Error().stack);
                     
                     // Provide helpful error messages based on close code and URL
-                    if (event.code === 1006) {
+                    if (event.code === 1001) {
+                        console.error('❌ Client initiated close - investigating cause');
+                        setPersonaState('idle', 'Connection terminated unexpectedly');
+                    } else if (event.code === 1006) {
                         setPersonaState('idle', 'Server unreachable');
                     } else if (event.code === 1000) {
                         setPersonaState('idle', 'Connection closed');
