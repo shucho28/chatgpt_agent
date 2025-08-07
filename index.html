@@ -837,9 +837,11 @@
         
         // Professional Audio Processing Handler - Industry Standard
         function handleAudioProcess(event) {
-            // Wait for session to be fully ready
+            // Wait for session to be fully ready with extended delay
+            const timeSinceSession = Date.now() - sessionStartTime;
             if (!isConnected || !isSessionReady || 
-                Date.now() - sessionStartTime < REALTIME_CONFIG.SESSION_READY_DELAY) {
+                timeSinceSession < 5000 || // Extended to 5 seconds
+                !realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN) {
                 return;
             }
             
@@ -897,9 +899,10 @@
                     return; // Skip low-quality audio
                 }
                 
-                // Rate limiting for optimal performance
+                // Rate limiting for optimal performance and server stability
                 const now = Date.now();
-                if (now - lastAudioSendTime < 45) { // ~22fps max
+                const timeSinceLastSend = now - lastAudioSendTime;
+                if (timeSinceLastSend < 100) { // Reduced to ~10fps to be gentler on OpenAI servers
                     return;
                 }
                 lastAudioSendTime = now;
@@ -923,9 +926,16 @@
             }
         }
         
-        // Send Audio to OpenAI Realtime API - Optimized
+        // Send Audio to OpenAI Realtime API - Optimized with Validation
         function sendAudioToRealtime(pcm16Data) {
-            if (!realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN) {
+            if (!realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN || 
+                !isConnected || !isSessionReady) {
+                return;
+            }
+            
+            // Additional safety check - don't send if we just connected
+            const timeSinceSession = Date.now() - sessionStartTime;
+            if (timeSinceSession < 5000) {
                 return;
             }
             
@@ -937,8 +947,17 @@
                 
                 realtimeSocket.send(audioMessage);
                 
+                // Log first few audio sends for debugging
+                if (Math.random() < 0.1) { // 10% sample rate
+                    console.log('📤 Audio sent:', {
+                        samples: pcm16Data.length,
+                        timeSinceSession: Math.round(timeSinceSession / 1000) + 's'
+                    });
+                }
+                
             } catch (error) {
                 console.error('❌ Failed to send audio to Realtime API:', error);
+                // Don't immediately reconnect on audio send errors
             }
         }
 
@@ -1068,17 +1087,22 @@
                     connectionAttempts = 0; // Reset retry counter on success
                     sessionStartTime = Date.now(); // Track session start time
                     
-                    // CRITICAL TEST: Don't send ANY session.update - use pure defaults
+                    // CRITICAL FIX: Use pure defaults and wait longer before audio processing
                     console.log('🔧 Using OpenAI defaults: PCM16 audio, alloy voice, server VAD');
                     isSessionReady = true;
-                    setPersonaState('idle', 'Ready! Speak now');
+                    setPersonaState('idle', 'Session ready - preparing audio...');
                     
-                    // Start professional audio processing after session stabilizes
+                    // Wait longer before starting audio to prevent immediate server errors
                     setTimeout(() => {
-                        if (isSessionReady && isConnected) {
+                        if (isSessionReady && isConnected && realtimeSocket && realtimeSocket.readyState === WebSocket.OPEN) {
+                            console.log('✅ Starting audio processing after stabilization period');
                             startRealtimeAudio();
+                            setPersonaState('idle', 'Ready! Speak now');
+                        } else {
+                            console.warn('⚠️ Session not ready for audio processing');
+                            setPersonaState('idle', 'Connection issues - tap to retry');
                         }
-                    }, REALTIME_CONFIG.SESSION_READY_DELAY);
+                    }, 3000); // Increased from 1000ms to 3000ms
                     break;
                 
                 case 'session.updated':
