@@ -697,13 +697,25 @@
                 if (typeof event.data === 'string') {
                     message = JSON.parse(event.data);
                     console.log('📨 Received text message:', message.type, message);
+                    
+                    // Special handling for session.created
+                    if (message.type === 'session.created') {
+                        console.log('🎯 FOUND session.created message!');
+                        console.log('🎯 Message content:', JSON.stringify(message, null, 2));
+                    }
+                } else if (event.data instanceof Blob) {
+                    // Binary data (audio) - handle as Blob
+                    console.log('📦 Received binary data (Blob):', event.data.size, 'bytes');
+                    return; // Skip binary messages for now
                 } else {
-                    // Binary data (audio) - convert to text first or handle separately
-                    console.log('📦 Received binary data:', event.data);
+                    // Other binary data
+                    console.log('📦 Received binary data (other):', event.data);
                     return; // Skip binary messages for now
                 }
             } catch (error) {
-                console.error('❌ Failed to parse WebSocket message:', error, event.data);
+                console.error('❌ Failed to parse WebSocket message:', error);
+                console.error('❌ Event data type:', typeof event.data);
+                console.error('❌ Event data:', event.data);
                 return;
             }
             
