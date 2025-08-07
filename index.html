@@ -414,17 +414,11 @@
                 // First priority: Check for deployed Vercel server
                 const vercelUrl = 'wss://chatgpt-agent.vercel.app/realtime';
                 
-                // Test if a Vercel deployment exists by trying common patterns
-                const possibleVercelUrls = [
-                    'wss://chatgpt-agent.vercel.app/realtime',
-                    'wss://openai-realtime-proxy.vercel.app/realtime',
-                    'wss://chatgpt-agent-shucho28.vercel.app/realtime'
-                ];
+                // Use the actual deployed Vercel URL
+                const deployedVercelUrl = 'wss://chatgpt-agent-6v3ieqn6e-shubhams-projects-56953eb9.vercel.app/realtime';
                 
-                // For now, return the most likely Vercel URL
-                // TODO: Add actual connectivity testing in future version
-                console.log('🔧 Using Vercel deployment URL');
-                return possibleVercelUrls[0];
+                console.log('🔧 Using deployed Vercel server');
+                return deployedVercelUrl;
                 
                 // Fallback: Try codespace detection if Vercel fails
                 // const codespaceUrl = detectCodespaceURL();
