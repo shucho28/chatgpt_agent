@@ -555,6 +555,13 @@
         // TEMPORARY: Disable audio sending due to OpenAI server issues (Jan 23, 2025)
         const DISABLE_AUDIO_SENDING = false; // Set to true to test without audio
         
+        // OpenAI Support Test Modes
+        const OPENAI_SUPPORT_TESTS = {
+            IMMEDIATE_AUDIO: true,  // Send audio 1-2s after session (vs 10s)
+            PRIME_WITH_SILENCE: true,  // Send silence chunk immediately after session
+            VERBOSE_LOGGING: true   // Extra logging for support investigation
+        };
+        
         // Memory management configuration
         const MEMORY_MANAGEMENT = {
             MAX_BUFFER_SIZE: 48000, // 2 seconds at 24kHz
@@ -886,10 +893,17 @@
         function handleAudioProcess(event) {
             // Wait for session to be fully ready with extended delay
             const timeSinceSession = Date.now() - sessionStartTime;
+            // OpenAI Support Test: Use immediate timing vs long delay
+            const requiredDelay = OPENAI_SUPPORT_TESTS.IMMEDIATE_AUDIO ? 1000 : 10000; // 1s vs 10s
+            
             if (!isConnected || !isSessionReady || 
-                timeSinceSession < 10000 || // Extended to 10 seconds due to OpenAI issues
+                timeSinceSession < requiredDelay ||
                 !realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN) {
                 return;
+            }
+            
+            if (OPENAI_SUPPORT_TESTS.VERBOSE_LOGGING && timeSinceSession < requiredDelay + 1000) {
+                console.log(`🧪 SUPPORT TEST: Audio processing started ${timeSinceSession}ms after session`);
             }
             
             try {
@@ -973,6 +987,35 @@
             }
         }
         
+        // OpenAI Support Test: Send silence primer chunk
+        function sendSilencePrimer() {
+            if (!realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN || !isConnected || !isSessionReady) {
+                console.warn('⚠️ Cannot send silence primer - connection not ready');
+                return;
+            }
+            
+            try {
+                // Create 100ms of silence (2400 samples at 24kHz)
+                const silenceSamples = 2400;
+                const silenceBuffer = new Int16Array(silenceSamples);
+                // silenceBuffer is already filled with zeros (silence)
+                
+                const audioMessage = JSON.stringify({
+                    type: 'input_audio_buffer.append',
+                    audio: arrayBufferToBase64(silenceBuffer.buffer)
+                });
+                
+                realtimeSocket.send(audioMessage);
+                
+                if (OPENAI_SUPPORT_TESTS.VERBOSE_LOGGING) {
+                    console.log('🔇 SUPPORT TEST: Silence primer sent -', silenceSamples, 'samples (100ms)');
+                }
+                
+            } catch (error) {
+                console.error('❌ Failed to send silence primer:', error);
+            }
+        }
+
         // Send Audio to OpenAI Realtime API - Optimized with Validation
         function sendAudioToRealtime(pcm16Data) {
             if (!realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN || 
@@ -980,10 +1023,16 @@
                 return;
             }
             
-            // ULTRA-CONSERVATIVE: Wait even longer due to OpenAI server issues since Jan 23, 2025
+            // OpenAI Support Test: Adjust timing based on test mode
             const timeSinceSession = Date.now() - sessionStartTime;
-            if (timeSinceSession < 10000) { // Increased to 10 seconds
+            const requiredDelay = OPENAI_SUPPORT_TESTS.IMMEDIATE_AUDIO ? 1000 : 10000; // 1s vs 10s
+            
+            if (timeSinceSession < requiredDelay) {
                 return;
+            }
+            
+            if (OPENAI_SUPPORT_TESTS.VERBOSE_LOGGING) {
+                console.log(`🧪 SUPPORT TEST: First audio chunk sent ${timeSinceSession}ms after session`);
             }
             
             // Additional safety: Only send audio if we haven't had any errors yet
@@ -1005,11 +1054,14 @@
                 
                 realtimeSocket.send(audioMessage);
                 
-                // Log first few audio sends for debugging
-                if (Math.random() < 0.1) { // 10% sample rate
-                    console.log('📤 Audio sent:', {
+                // Enhanced logging for OpenAI Support investigation
+                if (OPENAI_SUPPORT_TESTS.VERBOSE_LOGGING || Math.random() < 0.1) {
+                    console.log('📤 SUPPORT TEST - Audio sent:', {
                         samples: pcm16Data.length,
-                        timeSinceSession: Math.round(timeSinceSession / 1000) + 's'
+                        timeSinceSession: Math.round(timeSinceSession / 1000) + 's',
+                        maxAmplitude: Math.max(...pcm16Data.map(Math.abs)),
+                        nonZeroSamples: pcm16Data.filter(s => s !== 0).length,
+                        bufferSize: pcm16Data.buffer.byteLength
                     });
                 }
                 
@@ -1145,22 +1197,41 @@
                     connectionAttempts = 0; // Reset retry counter on success
                     sessionStartTime = Date.now(); // Track session start time
                     
-                    // CRITICAL FIX: Use pure defaults and wait longer before audio processing
+                    // CRITICAL FIX: Use pure defaults and implement OpenAI Support test suggestions
                     console.log('🔧 Using OpenAI defaults: PCM16 audio, alloy voice, server VAD');
                     isSessionReady = true;
-                    setPersonaState('idle', 'Session ready - preparing audio...');
                     
-                    // Wait longer before starting audio to prevent immediate server errors
+                    if (OPENAI_SUPPORT_TESTS.VERBOSE_LOGGING) {
+                        console.log('🧪 SUPPORT TEST MODE - Testing immediate audio suggestions');
+                    }
+                    
+                    // OpenAI Support Test: Prime with silence immediately after session creation
+                    if (OPENAI_SUPPORT_TESTS.PRIME_WITH_SILENCE) {
+                        setTimeout(() => {
+                            if (isSessionReady && isConnected && realtimeSocket && realtimeSocket.readyState === WebSocket.OPEN) {
+                                console.log('🔇 SUPPORT TEST: Sending silence chunk immediately after session');
+                                sendSilencePrimer();
+                            }
+                        }, 500); // 500ms after session creation
+                    }
+                    
+                    setPersonaState('idle', 'Session ready - testing immediate audio...');
+                    
+                    // OpenAI Support Test: Immediate audio (1-2s) vs long wait (10s)
+                    const audioDelay = OPENAI_SUPPORT_TESTS.IMMEDIATE_AUDIO ? 1500 : 10000; // 1.5s vs 10s
+                    
                     setTimeout(() => {
                         if (isSessionReady && isConnected && realtimeSocket && realtimeSocket.readyState === WebSocket.OPEN) {
-                            console.log('✅ Starting audio processing after stabilization period');
+                            if (OPENAI_SUPPORT_TESTS.VERBOSE_LOGGING) {
+                                console.log(`✅ SUPPORT TEST: Starting audio after ${audioDelay}ms delay`);
+                            }
                             startRealtimeAudio();
                             setPersonaState('idle', 'Ready! Speak now');
                         } else {
                             console.warn('⚠️ Session not ready for audio processing');
                             setPersonaState('idle', 'Connection issues - tap to retry');
                         }
-                    }, 3000); // Increased from 1000ms to 3000ms
+                    }, audioDelay);
                     break;
                 
                 case 'session.updated':
