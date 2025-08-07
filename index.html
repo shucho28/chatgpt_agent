@@ -644,47 +644,82 @@
             realtimeSocket.send(testMessage);
         }
 
-        // Start real-time audio streaming with modern Web Audio API
+        // Start real-time audio streaming with MediaRecorder (more reliable)
         function startRealtimeAudio() {
-            if (!isConnected || !isSessionReady || !audioStream || !audioContext) {
-                console.log('⚠️ Not ready for audio streaming:', { isConnected, isSessionReady, hasAudioStream: !!audioStream, hasAudioContext: !!audioContext });
+            if (!isConnected || !isSessionReady || !audioStream) {
+                console.log('⚠️ Not ready for audio streaming:', { isConnected, isSessionReady, hasAudioStream: !!audioStream });
                 return;
             }
             
-            console.log('🎤 Starting real-time audio streaming...');
+            console.log('🎤 Starting MediaRecorder-based audio streaming...');
+            
+            // Use MediaRecorder for more reliable audio capture
+            try {
+                const mediaRecorder = new MediaRecorder(audioStream, {
+                    mimeType: 'audio/webm;codecs=opus',
+                    audioBitsPerSecond: 48000
+                });
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0 && isConnected && isSessionReady) {
+                        handleAudioData(event.data);
+                    }
+                };
+                
+                mediaRecorder.onerror = (error) => {
+                    console.error('❌ MediaRecorder error:', error);
+                };
+                
+                // Record in small chunks for real-time processing
+                mediaRecorder.start(250); // 250ms chunks
+                
+                console.log('✅ MediaRecorder audio streaming active');
+                
+                // Store reference for cleanup
+                window.currentMediaRecorder = mediaRecorder;
+                
+            } catch (error) {
+                console.error('❌ MediaRecorder not supported, falling back to manual processing');
+                startLegacyAudioProcessing();
+            }
+        }
+        
+        // Handle audio data from MediaRecorder
+        async function handleAudioData(audioBlob) {
+            // Don't send audio data immediately after session creation
+            if (Date.now() - sessionStartTime < 3000) {
+                return; // Wait 3 seconds after session creation
+            }
+            
+            try {
+                // Convert blob to base64 for sending to OpenAI
+                const arrayBuffer = await audioBlob.arrayBuffer();
+                const base64Audio = arrayBufferToBase64(arrayBuffer);
+                
+                console.log('📤 Sending MediaRecorder audio:', {
+                    blobSize: audioBlob.size,
+                    mimeType: audioBlob.type,
+                    bufferSize: arrayBuffer.byteLength,
+                    timeSinceSession: Date.now() - sessionStartTime
+                });
+                
+                const audioMessage = JSON.stringify({
+                    type: 'input_audio_buffer.append',
+                    audio: base64Audio
+                });
+                
+                realtimeSocket.send(audioMessage);
+                
+            } catch (error) {
+                console.error('❌ Error processing MediaRecorder audio:', error);
+            }
+        }
+
+        // Legacy audio processing (fallback for older browsers)
+        function startLegacyAudioProcessing() {
+            console.log('🔄 Using legacy ScriptProcessor audio processing');
             
             const source = audioContext.createMediaStreamSource(audioStream);
-            
-            // Use modern approach - we'll process audio in chunks
-            let isProcessing = false;
-            
-            const processAudioChunk = async () => {
-                if (!isConnected || !realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN || isProcessing) {
-                    requestAnimationFrame(processAudioChunk);
-                    return;
-                }
-                
-                isProcessing = true;
-                
-                try {
-                    // Create a short audio buffer to capture current audio
-                    const bufferSize = 4096;
-                    const mediaRecorder = new MediaRecorder(audioStream, {
-                        mimeType: 'audio/webm;codecs=opus'
-                    });
-                    
-                    // For now, we'll continue using ScriptProcessor but with better error handling
-                    // TODO: Implement proper AudioWorkletNode in future update
-                    
-                } catch (error) {
-                    console.error('❌ Audio processing error:', error);
-                }
-                
-                isProcessing = false;
-                requestAnimationFrame(processAudioChunk);
-            };
-            
-            // For now, keep the working ScriptProcessor approach but add better error handling
             const processor = audioContext.createScriptProcessor(4096, 1, 1);
             
             processor.onaudioprocess = (event) => {
@@ -694,81 +729,38 @@
                 
                 // Don't send audio data immediately after session creation
                 if (Date.now() - sessionStartTime < 3000) {
-                    return; // Wait 3 seconds after session creation
+                    return;
                 }
                 
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
                     
-                    // Check if we have valid audio input
-                    if (!inputData || inputData.length === 0) {
-                        return; // Skip empty audio
-                    }
-                    
-                    // Validate input audio data first
-                    if (!inputData || inputData.length === 0 || inputData.length !== 4096) {
-                        return; // Skip invalid audio chunks
-                    }
-                    
-                    // Check for NaN or infinite values in input
-                    let hasValidSamples = false;
-                    for (let i = 0; i < inputData.length; i++) {
-                        if (!isFinite(inputData[i])) {
-                            console.warn('⚠️ Invalid audio sample detected, skipping chunk');
-                            return;
-                        }
-                        if (Math.abs(inputData[i]) > 0.001) {
-                            hasValidSamples = true;
-                        }
-                    }
-                    
-                    // Skip chunks with no meaningful audio signal
-                    if (!hasValidSamples) {
+                    if (!inputData || inputData.length !== 4096) {
                         return;
                     }
                     
-                    // Convert to PCM16 format (as expected by OpenAI default session)
+                    // Convert to PCM16 format
                     const pcm16Data = new Int16Array(inputData.length);
                     let maxAmplitude = 0;
                     
                     for (let i = 0; i < inputData.length; i++) {
-                        // Convert float32 (-1.0 to 1.0) to PCM16 (-32768 to 32767)
                         const sample = Math.max(-32768, Math.min(32767, Math.round(inputData[i] * 32767)));
                         pcm16Data[i] = sample;
                         maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
                     }
                     
-                    // Skip silent audio chunks - more conservative threshold
                     if (maxAmplitude < 200) {
-                        return; // Skip very quiet audio
-                    }
-                    
-                    // Validate PCM16 data before sending
-                    if (pcm16Data.length === 0 || pcm16Data.buffer.byteLength === 0) {
-                        console.warn('⚠️ Empty PCM16 buffer, skipping');
                         return;
                     }
                     
-                    // Log the first few audio chunks for debugging
-                    const currentTime = Date.now();
-                    const timeSinceSession = currentTime - sessionStartTime;
-                    if (timeSinceSession < 10000) { // Log first 10 seconds of audio
-                        console.log(`📤 Sending audio chunk (${timeSinceSession}ms after session):`, {
-                            samples: pcm16Data.length,
-                            maxAmplitude: maxAmplitude,
-                            bufferSize: pcm16Data.buffer.byteLength,
-                            firstSamples: Array.from(pcm16Data.slice(0, 10))
-                        });
-                    }
-                    
-                    // Send audio data in PCM16 format as expected by OpenAI
                     const audioMessage = JSON.stringify({
                         type: 'input_audio_buffer.append',
                         audio: arrayBufferToBase64(pcm16Data.buffer)
                     });
+                    
                     realtimeSocket.send(audioMessage);
                 } catch (error) {
-                    console.error('❌ Audio processing error:', error);
+                    console.error('❌ Legacy audio processing error:', error);
                 }
             };
             
@@ -776,7 +768,7 @@
             processor.connect(audioContext.destination);
             
             microphoneSource = { source, processor };
-            console.log('✅ Real-time audio streaming active (ScriptProcessor - will migrate to AudioWorklet)');
+            console.log('✅ Legacy audio streaming active (ScriptProcessor)');
         }
 
         // Handle Realtime API messages
