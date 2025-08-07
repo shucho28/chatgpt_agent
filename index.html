@@ -704,8 +704,28 @@
                         console.log('🎯 Message content:', JSON.stringify(message, null, 2));
                     }
                 } else if (event.data instanceof Blob) {
-                    // Binary data (audio) - handle as Blob
+                    // Binary data (audio) - try to read as text first in case it's JSON
                     console.log('📦 Received binary data (Blob):', event.data.size, 'bytes');
+                    
+                    // Try to read Blob as text in case it's actually JSON
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const textData = e.target.result;
+                            if (textData.trim().startsWith('{')) {
+                                console.log('🔍 Blob contains JSON text:', textData);
+                                const jsonMessage = JSON.parse(textData);
+                                if (jsonMessage.type === 'session.created') {
+                                    console.log('🎯 FOUND session.created in BLOB!');
+                                    // Process it as if it was a text message
+                                    handleRealtimeMessage({data: textData});
+                                }
+                            }
+                        } catch (e) {
+                            console.log('📦 Blob is binary audio data');
+                        }
+                    };
+                    reader.readAsText(event.data);
                     return; // Skip binary messages for now
                 } else {
                     // Other binary data
