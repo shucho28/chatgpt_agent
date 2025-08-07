@@ -51,13 +51,14 @@ async function testRegularAPI() {
     }
 }
 
-// Test 2: Test Realtime API WebSocket connection
-function testRealtimeAPI() {
+// Test 2: Test Realtime API WebSocket connection with different models
+function testRealtimeAPI(model = 'gpt-4o-realtime-preview-2024-10-01') {
     return new Promise((resolve) => {
         console.log('\n2️⃣ Testing Realtime API WebSocket connection...');
         
-        const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01';
+        const url = `wss://api.openai.com/v1/realtime?model=${model}`;
         console.log('🔗 Connecting to:', url.replace(OPENAI_API_KEY, '***'));
+        console.log('🤖 Testing model:', model);
         
         const ws = new WebSocket(url, {
             headers: {
@@ -147,17 +148,48 @@ async function runTests() {
         return;
     }
     
-    const realtimeResult = await testRealtimeAPI();
+    // Test multiple models to find which one works
+    const modelsToTest = [
+        'gpt-4o-mini-realtime-preview-2024-12-17',
+        'gpt-4o-realtime-preview-2024-12-17',
+        'gpt-4o-realtime-preview-2024-10-01'
+    ];
+    
+    let workingModel = null;
+    let workingResult = null;
+    
+    for (const model of modelsToTest) {
+        console.log(`\n🧪 Testing model: ${model}`);
+        const result = await testRealtimeAPI(model);
+        
+        if (result.success && result.noImmediateError) {
+            workingModel = model;
+            workingResult = result;
+            console.log(`✅ Found working model: ${model}`);
+            break;
+        } else {
+            console.log(`❌ Model ${model} failed:`, result.error?.message || result.error);
+        }
+        
+        // Wait between tests to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
+    const realtimeResult = workingResult || await testRealtimeAPI(modelsToTest[2]); // Fallback to last test
     
     console.log('\n📊 TEST RESULTS:');
     console.log('================');
     console.log(`Regular API: ${regularAPIWorks ? '✅ Working' : '❌ Failed'}`);
     console.log(`Realtime API: ${realtimeResult.success ? '✅ Working' : '❌ Failed'}`);
     
-    if (!realtimeResult.success) {
+    if (workingModel) {
+        console.log(`🎯 WORKING MODEL FOUND: ${workingModel}`);
+        console.log(`💡 Use this URL: https://shucho.space/?model=${workingModel}`);
+    } else if (!realtimeResult.success) {
         console.log(`❌ Realtime API Issue: ${realtimeResult.error?.message || realtimeResult.error}`);
-        console.log('\n💡 CONCLUSION: The issue is with OpenAI\'s Realtime API service, not our code.');
-        console.log('   This matches the reported issues since January 23, 2025.');
+        console.log('\n💡 CONCLUSION: The issue appears to be model-specific or API-wide instability.');
+        console.log('   All tested models failed with server errors.');
+        console.log('   This confirms the issues reported since January 23, 2025.');
         console.log('   Try again later or contact OpenAI support.');
     } else {
         console.log('✅ Realtime API appears to be working');

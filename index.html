@@ -482,13 +482,45 @@
         };
         
         const PROXY_URL = getProxyURL();
-        const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-10-01';
+        
+        // Available Realtime API models - try newer versions first
+        const AVAILABLE_MODELS = [
+            'gpt-4o-mini-realtime-preview-2024-12-17',  // Newer, more stable mini version
+            'gpt-4o-realtime-preview-2024-12-17',       // Newer full version (if available)
+            'gpt-4o-realtime-preview-2024-10-01'        // Current version (has known issues)
+        ];
+        
+        // Auto-select model or allow manual override
+        const getSelectedModel = () => {
+            // Check URL parameters for manual model selection
+            const params = new URLSearchParams(window.location.search);
+            const urlModel = params.get('model');
+            if (urlModel && AVAILABLE_MODELS.includes(urlModel)) {
+                console.log('🎯 Using URL-specified model:', urlModel);
+                return urlModel;
+            }
+            
+            // Check localStorage for saved preference
+            const savedModel = localStorage.getItem('preferred_realtime_model');
+            if (savedModel && AVAILABLE_MODELS.includes(savedModel)) {
+                console.log('💾 Using saved model preference:', savedModel);
+                return savedModel;
+            }
+            
+            // Default to newest mini model (more stable and cost-effective)
+            console.log('🔄 Using default model:', AVAILABLE_MODELS[0]);
+            return AVAILABLE_MODELS[0];
+        };
+        
+        const REALTIME_MODEL = getSelectedModel();
         
         console.log('🔧 Environment detection:');
         console.log('   Hostname:', window.location.hostname);
         console.log('   Protocol:', window.location.protocol);
         console.log('   Full URL:', window.location.href);
         console.log('🔧 Using proxy URL:', PROXY_URL);
+        console.log('🤖 Using model:', REALTIME_MODEL);
+        console.log('💡 To try different model: ?model=gpt-4o-mini-realtime-preview-2024-12-17');
         
         // Professional OpenAI Realtime API Configuration
         const REALTIME_CONFIG = {
@@ -514,6 +546,8 @@
         let lastAudioSendTime = 0;
         let connectionAttempts = 0;
         let maxRetries = 5;
+        let currentModelIndex = AVAILABLE_MODELS.indexOf(REALTIME_MODEL);
+        let modelFallbackAttempts = 0;
         let memoryCleanupInterval = null;
         let heartbeatInterval = null;
         let preventClose = false;
@@ -1181,8 +1215,10 @@
                         const delay = baseDelay + jitter;
                         
                         console.log(`🔄 OpenAI server error - retrying (${connectionAttempts}/${maxRetries}) in ${Math.round(delay/1000)}s...`);
+                        console.log(`🤖 Model: ${REALTIME_MODEL}`);
                         console.log(`📋 Session ID: ${message.error?.event_id || 'N/A'}`);
                         console.log(`📋 Error: ${message.error?.message || 'Unknown error'}`);
+                        console.log(`💡 Try different model: ${window.location.origin}${window.location.pathname}?model=gpt-4o-mini-realtime-preview-2024-12-17`);
                         
                         setPersonaState('idle', `Server busy - retry ${connectionAttempts}/${maxRetries}`);
                         
