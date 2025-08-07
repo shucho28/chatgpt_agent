@@ -1,72 +1,80 @@
-# 🤖 AI Voice Assistant
+# 🎤 Professional OpenAI Realtime Voice Assistant
 
-A futuristic voice-activated AI assistant built with OpenAI's advanced APIs, featuring a stunning cyberpunk interface optimized for iPad home assistant use.
+An industry-grade voice assistant built exclusively with OpenAI's Realtime API, featuring professional audio processing, enterprise-level reliability, and a stunning futuristic interface.
 
 ## ✨ Features
 
-### 🎙️ Advanced Voice Processing
-- **Dual-Mode Operation**: Automatic fallback from OpenAI Realtime API to enhanced Audio API
-- **High-Quality Speech Recognition**: OpenAI Whisper for accurate transcription
-- **Natural Text-to-Speech**: OpenAI TTS with premium "nova" voice
-- **Smart Voice Activity Detection**: Automatic conversation flow management
+### 🎯 **Professional Voice Processing**
+- **24kHz High-Quality Audio** - Industry standard sample rate matching OpenAI specifications
+- **Optimized Chunk Processing** - 50ms chunks (~20fps) for real-time performance
+- **Professional Noise Gate** - Intelligent audio filtering and validation
+- **PCM16 Format** - Exact OpenAI Realtime API format compliance
 
-### 🎨 Futuristic Interface
-- **Cyberpunk Aesthetic**: Vibrant neon colors with animated particle effects
-- **Dynamic Visual States**: Responsive orb animations for Idle, Listening, Thinking, Speaking
-- **iPad Optimized**: Perfect for locked iPad home assistant display
-- **Touch-Friendly**: Tap-to-activate with intuitive visual feedback
+### 🔊 **Advanced Audio Pipeline**
+- **Echo Cancellation** - Professional-grade audio cleanup
+- **Noise Suppression** - Advanced background noise filtering
+- **Auto Gain Control** - Consistent voice levels across environments
+- **High-pass Filtering** - Remove low-frequency interference
 
-### 🔧 Technical Architecture
-- **OpenAI Assistant Integration**: Leverages your custom assistant with conversation context
-- **Robust Error Handling**: Comprehensive fallback systems and connection management
-- **Real-time Audio Processing**: WebRTC audio capture with voice activity detection
-- **Responsive Design**: Optimized for various screen sizes and touch devices
+### 🏢 **Enterprise-Grade Reliability**
+- **Intelligent Retry Logic** - Progressive backoff with up to 5 retry attempts
+- **Connection Monitoring** - Real-time WebSocket health checks
+- **Professional Error Recovery** - Graceful handling of temporary service issues
+- **Advanced Logging** - Detailed monitoring and debugging information
+
+### 🎨 **Premium User Experience**
+- **Futuristic UI** - Animated orb with real-time visual state feedback
+- **Professional Status Display** - Live connection and processing indicators
+- **Responsive Design** - Optimized for all devices and browsers
+- **Smooth Animations** - Hardware-accelerated state transitions
 
 ## 🚀 Live Demo
 
-Visit **[https://shucho.space](https://shucho.space)** to experience the assistant live!
+Visit **[https://shucho.space](https://shucho.space)** to experience the professional voice assistant live!
 
-## 🛠️ Setup & Configuration
+## 🚀 Quick Start
 
 ### Prerequisites
-- OpenAI API key with access to:
-  - Whisper API (speech-to-text)
-  - Assistants API 
-  - TTS API (text-to-speech)
-  - Realtime API (optional, falls back gracefully)
+- Node.js 18+ 
+- OpenAI API key with **Realtime API access** (required)
+- Modern browser with microphone access
 
 ### Installation
-1. Clone the repository:
+
+1. **Clone the repository**
    ```bash
    git clone https://github.com/shucho28/chatgpt_agent.git
    cd chatgpt_agent
    ```
 
-2. Configure your OpenAI credentials in `index.html`:
-   ```javascript
-   // Update these arrays with your API key and Assistant ID
-   const keyParts = ['your-api-key-part1', 'your-api-key-part2'];
-   const assistantParts = ['your-assistant-id-part1', 'your-assistant-id-part2'];
+2. **Set up environment variables**
+   ```bash
+   export OPENAI_API_KEY="your-openai-api-key"
    ```
 
-3. Deploy to any web server or open `index.html` directly in a modern browser
+3. **Deploy the proxy server**
+   - The application uses a Railway-deployed WebSocket proxy
+   - Current server: `wss://openai-realtime-proxy-production-710a.up.railway.app/realtime`
+   - For custom deployment, see [Server Setup](#server-setup) below
 
-### GitHub Pages Deployment
-This project is configured for GitHub Pages deployment:
-- Push changes to the `main` branch
-- Enable GitHub Pages in repository settings
-- Your assistant will be live at `https://yourusername.github.io/chatgpt_agent`
+4. **Open the application**
+   ```bash
+   open index.html
+   # Or deploy to your web server
+   ```
 
-### Server Deployment (Required for Voice)
-The voice assistant requires a WebSocket proxy server:
+### Server Setup (Required)
+The Realtime API requires a WebSocket proxy server for authentication:
 
-**Option 1 - GitHub Codespaces (Easiest)**:
-1. Click "Code" → "Codespaces" → "Create codespace on main"
-2. Copy the public URL for port 3001
-3. Update the proxy URL in `index.html`
-4. Push changes
+**Option 1 - Use Existing Railway Deployment**:
+- The app is pre-configured with a working Railway deployment
+- No additional setup required
 
-**Option 2 - External Services**: See `DEPLOYMENT.md` for Vercel, Railway, Render options
+**Option 2 - Deploy Your Own**:
+```javascript
+// Update proxy URL in index.html
+const PROXY_URL = 'wss://your-server.railway.app/realtime';
+```
 
 ## 🎯 Usage
 

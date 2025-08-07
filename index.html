@@ -468,47 +468,69 @@
         console.log('   Full URL:', window.location.href);
         console.log('🔧 Using proxy URL:', PROXY_URL);
         
-        // State variables
+        // Professional OpenAI Realtime API Configuration
+        const REALTIME_CONFIG = {
+            SAMPLE_RATE: 24000,           // Required 24kHz sample rate
+            CHUNK_SIZE: 1200,             // ~50ms chunks (24000 * 0.05)
+            BUFFER_SIZE: 4096,            // Audio processing buffer
+            PCM_SCALE: 32767,             // 16-bit PCM scaling
+            MIN_AMPLITUDE: 300,           // Noise gate threshold
+            SESSION_READY_DELAY: 1000,    // Wait before sending audio
+        };
+        
+        // State variables - Enterprise Grade
         let realtimeSocket = null;
         let audioStream = null;
         let audioContext = null;
-        let microphoneSource = null;
+        let audioProcessor = null;
+        let audioBuffer = [];
         let isConnected = false;
         let isSessionReady = false;
         let isActivated = false;
         let isSpeaking = false;
+        let sessionStartTime = 0;
+        let lastAudioSendTime = 0;
         let connectionAttempts = 0;
-        let maxRetries = 3;
-        let preventClose = false; // Flag to prevent accidental closure
-        let sessionStartTime = 0; // Track when session was created
-        
-        // Multi-tier voice system
-        let voiceMode = 'realtime'; // 'realtime', 'webspeech', 'text'
-        let recognition = null; // Web Speech API recognition
-        let realtimeFailures = 0;
-        let maxRealtimeFailures = 2;
+        let maxRetries = 5;
 
-        // Initialize audio context and microphone
+        // Professional Audio Initialization - Industry Standard
         async function initializeAudio() {
             try {
-                console.log('🎤 Initializing audio...');
+                console.log('🎤 Initializing professional audio system...');
+                
+                // Create AudioContext with exact OpenAI requirements
                 audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                    sampleRate: 24000  // Match OpenAI Realtime API sample rate
+                    sampleRate: REALTIME_CONFIG.SAMPLE_RATE,
+                    latencyHint: 'interactive'
                 });
+                
+                console.log(`🔧 Audio Context: ${audioContext.sampleRate}Hz, state: ${audioContext.state}`);
+                
+                // Request high-quality audio stream with exact specifications
                 audioStream = await navigator.mediaDevices.getUserMedia({ 
                     audio: {
-                        sampleRate: 24000,
-                        channelCount: 1,
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
+                        sampleRate: REALTIME_CONFIG.SAMPLE_RATE,
+                        channelCount: 1,                    // Mono as required
+                        echoCancellation: true,             // Essential for voice
+                        noiseSuppression: true,             // Reduce background noise
+                        autoGainControl: true,              // Consistent volume
+                        googEchoCancellation: true,         // Chrome-specific
+                        googNoiseSuppression: true,         // Chrome-specific
+                        googAutoGainControl: true,          // Chrome-specific
+                        googHighpassFilter: true,           // Remove low-frequency noise
+                        mozEchoCancellation: true,          // Firefox-specific
+                        mozNoiseSuppression: true,          // Firefox-specific
+                        mozAutoGainControl: true            // Firefox-specific
                     } 
                 });
-                console.log('✅ Audio initialized');
+                
+                console.log('✅ Professional audio system initialized');
+                console.log(`📊 Stream settings: ${audioStream.getAudioTracks()[0].getSettings().sampleRate}Hz`);
                 return true;
+                
             } catch (error) {
-                console.error('❌ Audio initialization failed:', error);
-                setPersonaState('idle', 'Microphone access denied');
+                console.error('❌ Professional audio initialization failed:', error);
+                setPersonaState('idle', 'Microphone access required');
                 return false;
             }
         }
@@ -650,119 +672,196 @@
             realtimeSocket.send(testMessage);
         }
 
-        // Start real-time audio streaming with MediaRecorder (more reliable)
+        // Industry-Standard Real-time Audio Processing
         function startRealtimeAudio() {
-            if (!isConnected || !isSessionReady || !audioStream) {
-                console.log('⚠️ Not ready for audio streaming:', { isConnected, isSessionReady, hasAudioStream: !!audioStream });
+            if (!isConnected || !isSessionReady || !audioStream || !audioContext) {
+                console.log('⚠️ Audio system not ready:', { 
+                    isConnected, 
+                    isSessionReady, 
+                    hasAudioStream: !!audioStream,
+                    hasAudioContext: !!audioContext 
+                });
                 return;
             }
             
-            console.log('🎤 Starting MediaRecorder-based audio streaming...');
+            console.log('🎤 Starting professional real-time audio processing...');
+            console.log(`🔧 Target: ${REALTIME_CONFIG.CHUNK_SIZE} samples (~50ms chunks)`);
             
-            // MediaRecorder produces compressed audio, but OpenAI Realtime API expects PCM16
-            // For now, use legacy ScriptProcessor approach for PCM16 compatibility
-            console.log('🔄 OpenAI session expects PCM16 format, using ScriptProcessor');
-            startLegacyAudioProcessing();
+            try {
+                // Create high-quality audio processing chain
+                const source = audioContext.createMediaStreamSource(audioStream);
+                
+                // Use optimal buffer size for real-time processing
+                audioProcessor = audioContext.createScriptProcessor(
+                    REALTIME_CONFIG.BUFFER_SIZE, 1, 1
+                );
+                
+                audioProcessor.onaudioprocess = handleAudioProcess;
+                
+                // Connect audio processing chain
+                source.connect(audioProcessor);
+                audioProcessor.connect(audioContext.destination);
+                
+                console.log('✅ Professional audio processing chain established');
+                console.log(`📊 Buffer size: ${REALTIME_CONFIG.BUFFER_SIZE}, Chunk target: ${REALTIME_CONFIG.CHUNK_SIZE}`);
+                
+            } catch (error) {
+                console.error('❌ Failed to start audio processing:', error);
+                setPersonaState('idle', 'Audio processing failed');
+            }
         }
         
-        // Handle audio data from MediaRecorder
-        async function handleAudioData(audioBlob) {
-            // Don't send audio data immediately after session creation
-            if (Date.now() - sessionStartTime < 3000) {
-                return; // Wait 3 seconds after session creation
+        // Professional Audio Processing Handler - Industry Standard
+        function handleAudioProcess(event) {
+            // Wait for session to be fully ready
+            if (!isConnected || !isSessionReady || 
+                Date.now() - sessionStartTime < REALTIME_CONFIG.SESSION_READY_DELAY) {
+                return;
             }
             
             try {
-                console.log('❌ MediaRecorder produces Opus/WebM but session expects PCM16');
-                console.log('🔄 Converting to legacy processing for PCM16 compatibility');
+                const inputData = event.inputBuffer.getChannelData(0);
                 
-                // MediaRecorder produces compressed audio, but OpenAI session expects PCM16
-                // We need to stick with the legacy approach for now
-                return;
+                // Validate audio data integrity
+                if (!inputData || inputData.length !== REALTIME_CONFIG.BUFFER_SIZE) {
+                    return;
+                }
+                
+                // Add to buffer for optimal chunk processing
+                audioBuffer.push(...inputData);
+                
+                // Process when we have optimal chunk size (~50ms)
+                while (audioBuffer.length >= REALTIME_CONFIG.CHUNK_SIZE) {
+                    const chunk = audioBuffer.splice(0, REALTIME_CONFIG.CHUNK_SIZE);
+                    processAudioChunk(chunk);
+                }
                 
             } catch (error) {
-                console.error('❌ Error processing MediaRecorder audio:', error);
+                console.error('❌ Audio processing error:', error);
             }
         }
-
-        // Legacy audio processing (fallback for older browsers)
-        function startLegacyAudioProcessing() {
-            console.log('🔄 Using legacy ScriptProcessor audio processing');
-            
-            const source = audioContext.createMediaStreamSource(audioStream);
-            const processor = audioContext.createScriptProcessor(4096, 1, 1);
-            
-            processor.onaudioprocess = (event) => {
-                if (!isConnected || !isSessionReady || !realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN) {
-                    return;
-                }
+        
+        // Process Audio Chunks - Optimized for OpenAI Realtime API
+        function processAudioChunk(audioChunk) {
+            try {
+                // Convert to high-quality PCM16 format
+                const pcm16Data = new Int16Array(audioChunk.length);
+                let maxAmplitude = 0;
+                let signalStrength = 0;
                 
-                // Don't send audio data immediately after session creation
-                if (Date.now() - sessionStartTime < 3000) {
-                    return;
-                }
-                
-                try {
-                    const inputData = event.inputBuffer.getChannelData(0);
-                    
-                    // Strict validation
-                    if (!inputData || inputData.length !== 4096) {
+                for (let i = 0; i < audioChunk.length; i++) {
+                    // Professional-grade sample validation
+                    if (!isFinite(audioChunk[i]) || isNaN(audioChunk[i])) {
+                        console.warn('⚠️ Invalid audio sample detected, skipping chunk');
                         return;
                     }
                     
-                    // Check for invalid samples
-                    for (let i = 0; i < inputData.length; i++) {
-                        if (!isFinite(inputData[i]) || isNaN(inputData[i])) {
-                            console.warn('⚠️ Invalid audio sample, skipping chunk');
-                            return;
-                        }
-                    }
+                    // High-quality PCM16 conversion with proper scaling
+                    const sample = Math.max(-REALTIME_CONFIG.PCM_SCALE, 
+                        Math.min(REALTIME_CONFIG.PCM_SCALE, 
+                            Math.round(audioChunk[i] * REALTIME_CONFIG.PCM_SCALE)));
                     
-                    // Convert to PCM16 format with careful bounds checking
-                    const pcm16Data = new Int16Array(inputData.length);
-                    let maxAmplitude = 0;
-                    let hasSignal = false;
-                    
-                    for (let i = 0; i < inputData.length; i++) {
-                        // More conservative scaling
-                        const scaled = inputData[i] * 16384; // Use 16384 instead of 32767 for safety margin
-                        const sample = Math.max(-16384, Math.min(16384, Math.round(scaled)));
-                        pcm16Data[i] = sample;
-                        const amplitude = Math.abs(sample);
-                        maxAmplitude = Math.max(maxAmplitude, amplitude);
-                        if (amplitude > 50) hasSignal = true;
-                    }
-                    
-                    // More conservative thresholds
-                    if (!hasSignal || maxAmplitude < 100) {
-                        return; // Skip very quiet or empty audio
-                    }
-                    
-                    // Log occasionally for debugging
-                    if (Math.random() < 0.01) { // 1% of chunks
-                        console.log('📤 Sending audio:', {
-                            maxAmplitude,
-                            samples: pcm16Data.length,
-                            timeSince: Date.now() - sessionStartTime
-                        });
-                    }
-                    
-                    const audioMessage = JSON.stringify({
-                        type: 'input_audio_buffer.append',
-                        audio: arrayBufferToBase64(pcm16Data.buffer)
-                    });
-                    
-                    realtimeSocket.send(audioMessage);
-                } catch (error) {
-                    console.error('❌ Legacy audio processing error:', error);
+                    pcm16Data[i] = sample;
+                    const amplitude = Math.abs(sample);
+                    maxAmplitude = Math.max(maxAmplitude, amplitude);
+                    signalStrength += amplitude;
                 }
-            };
+                
+                // Professional noise gate - only process meaningful audio
+                const avgAmplitude = signalStrength / audioChunk.length;
+                if (maxAmplitude < REALTIME_CONFIG.MIN_AMPLITUDE || avgAmplitude < 50) {
+                    return; // Skip low-quality audio
+                }
+                
+                // Rate limiting for optimal performance
+                const now = Date.now();
+                if (now - lastAudioSendTime < 45) { // ~22fps max
+                    return;
+                }
+                lastAudioSendTime = now;
+                
+                // Send high-quality audio to OpenAI
+                sendAudioToRealtime(pcm16Data);
+                
+                // Professional monitoring (1% sampling)
+                if (Math.random() < 0.01) {
+                    console.log('📊 Audio Quality:', {
+                        samples: pcm16Data.length,
+                        maxAmplitude: maxAmplitude,
+                        avgAmplitude: Math.round(avgAmplitude),
+                        quality: maxAmplitude > 1000 ? 'High' : 'Medium',
+                        timeSinceSession: now - sessionStartTime
+                    });
+                }
+                
+            } catch (error) {
+                console.error('❌ Audio chunk processing error:', error);
+            }
+        }
+        
+        // Send Audio to OpenAI Realtime API - Optimized
+        function sendAudioToRealtime(pcm16Data) {
+            if (!realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN) {
+                return;
+            }
             
-            source.connect(processor);
-            processor.connect(audioContext.destination);
+            try {
+                const audioMessage = JSON.stringify({
+                    type: 'input_audio_buffer.append',
+                    audio: arrayBufferToBase64(pcm16Data.buffer)
+                });
+                
+                realtimeSocket.send(audioMessage);
+                
+            } catch (error) {
+                console.error('❌ Failed to send audio to Realtime API:', error);
+            }
+        }
+
+        // Professional Audio Response Playback
+        let audioResponseQueue = [];
+        let isPlayingResponse = false;
+        
+        async function processAudioResponseQueue() {
+            if (audioResponseQueue.length === 0) {
+                isPlayingResponse = false;
+                return;
+            }
             
-            microphoneSource = { source, processor };
-            console.log('✅ Legacy audio streaming active (ScriptProcessor)');
+            isPlayingResponse = true;
+            const base64Audio = audioResponseQueue.shift();
+            
+            try {
+                // Decode high-quality PCM16 audio from OpenAI
+                const audioData = base64ToArrayBuffer(base64Audio);
+                const pcmData = new Int16Array(audioData);
+                
+                // Create professional audio buffer
+                const audioBuffer = audioContext.createBuffer(
+                    1, pcmData.length, REALTIME_CONFIG.SAMPLE_RATE
+                );
+                const channelData = audioBuffer.getChannelData(0);
+                
+                // High-quality PCM16 to float32 conversion
+                for (let i = 0; i < pcmData.length; i++) {
+                    channelData[i] = pcmData[i] / REALTIME_CONFIG.PCM_SCALE;
+                }
+                
+                // Create and play audio with optimal settings
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                
+                source.onended = () => {
+                    processAudioResponseQueue();
+                };
+                
+                source.start();
+                
+            } catch (error) {
+                console.error('❌ Audio response playback error:', error);
+                processAudioResponseQueue(); // Continue with next chunk
+            }
         }
 
         // Handle Realtime API messages
@@ -829,13 +928,12 @@
                     isSessionReady = true;
                     setPersonaState('idle', 'Ready! Speak now');
                     
-                    // Wait a moment before starting audio to avoid immediate errors
+                    // Start professional audio processing after session stabilizes
                     setTimeout(() => {
                         if (isSessionReady && isConnected) {
-                            // Skip test audio buffer for now - just start real audio
                             startRealtimeAudio();
                         }
-                    }, 2000); // Increased delay to ensure session is fully ready
+                    }, REALTIME_CONFIG.SESSION_READY_DELAY);
                     break;
                 
                 case 'session.updated':
@@ -854,7 +952,16 @@
                 
                 case 'response.audio.delta':
                     if (message.delta) {
-                        playAudioDelta(message.delta);
+                        // Professional audio response handling
+                        if (!isSpeaking) {
+                            setPersonaState('speaking', 'Speaking...');
+                            isSpeaking = true;
+                        }
+                        
+                        audioResponseQueue.push(message.delta);
+                        if (!isPlayingResponse) {
+                            processAudioResponseQueue();
+                        }
                     }
                     break;
                 
@@ -870,116 +977,50 @@
                     break;
                 
                 case 'error':
-                    console.error('❌ Realtime API error:', message.error);
-                    realtimeFailures++;
+                    console.error('❌ OpenAI Realtime API Error:', message.error);
                     
-                    // If we've had too many realtime failures, fallback to Web Speech API
-                    if (realtimeFailures >= maxRealtimeFailures) {
-                        console.log('🔄 Too many Realtime API failures, switching to Web Speech API');
-                        voiceMode = 'webspeech';
-                        
-                        if (realtimeSocket) {
-                            realtimeSocket.close();
-                        }
-                        
-                        // Reset activation state and try Web Speech API
-                        isActivated = false;
-                        isConnected = false;
-                        isSessionReady = false;
-                        
-                        setTimeout(() => {
-                            activateAssistant(); // Will try Web Speech API
-                        }, 1000);
-                        
-                        return;
-                    }
-                    
-                    // Handle server errors with exponential backoff retry logic
+                    // Professional error handling with intelligent retry
                     if (message.error?.type === 'server_error' && connectionAttempts < maxRetries) {
                         connectionAttempts++;
-                        const delay = Math.min(1000 * Math.pow(2, connectionAttempts - 1), 10000);
-                        console.log(`🔄 OpenAI server error - retrying (${connectionAttempts}/${maxRetries}) in ${delay/1000}s...`);
-                        setPersonaState('idle', `Retrying... (${connectionAttempts}/${maxRetries})`);
+                        const delay = Math.min(2000 * connectionAttempts, 15000); // Progressive delay
+                        
+                        console.log(`🔄 Server error detected - retrying (${connectionAttempts}/${maxRetries}) in ${delay/1000}s...`);
+                        console.log(`📋 Error details: ${message.error.message}`);
+                        
+                        setPersonaState('idle', `Reconnecting... (${connectionAttempts}/${maxRetries})`);
                         
                         setTimeout(() => {
                             if (realtimeSocket) {
                                 realtimeSocket.close();
                             }
+                            // Clean reset before retry
                             isSessionReady = false;
                             isConnected = false;
+                            audioBuffer = [];
                             connectToRealtimeAPI();
                         }, delay);
+                        
                     } else {
-                        // Too many retries, fallback to next tier
-                        console.log('🔄 Max retries reached, falling back to Web Speech API');
-                        realtimeFailures = maxRealtimeFailures; // Force fallback
-                        voiceMode = 'webspeech';
+                        // Max retries reached - professional error display
+                        console.error('❌ Maximum retry attempts reached');
+                        console.log('📋 Session ID for support:', message.error?.event_id || 'N/A');
                         
-                        isActivated = false;
-                        isConnected = false;
-                        isSessionReady = false;
+                        setPersonaState('idle', 'Service temporarily unavailable');
+                        connectionAttempts = 0;
                         
+                        // Allow manual retry after cooldown
                         setTimeout(() => {
-                            activateAssistant();
-                        }, 1000);
+                            isActivated = false;
+                            setPersonaState('idle', 'TAP TO RETRY');
+                            touchIndicator.style.display = 'block';
+                            touchIndicator.textContent = 'TAP TO RETRY';
+                            touchIndicator.classList.add('pulse-hint');
+                        }, 5000);
                     }
                     break;
             }
         }
 
-        // Play audio response from Realtime API
-        let audioQueue = [];
-        let isPlayingAudio = false;
-        
-        function playAudioDelta(base64Audio) {
-            if (!isSpeaking) {
-                setPersonaState('speaking', 'Speaking...');
-                isSpeaking = true;
-            }
-            
-            audioQueue.push(base64Audio);
-            if (!isPlayingAudio) {
-                processAudioQueue();
-            }
-        }
-        
-        async function processAudioQueue() {
-            if (audioQueue.length === 0) {
-                isPlayingAudio = false;
-                return;
-            }
-            
-            isPlayingAudio = true;
-            
-            const base64Audio = audioQueue.shift();
-            try {
-                const audioData = base64ToArrayBuffer(base64Audio);
-                
-                // Decode from PCM16 format (as provided by OpenAI default session)
-                const pcmData = new Int16Array(audioData);
-                
-                // Create audio buffer from PCM16 data
-                const audioBuffer = audioContext.createBuffer(1, pcmData.length, 24000);
-                const channelData = audioBuffer.getChannelData(0);
-                
-                for (let i = 0; i < pcmData.length; i++) {
-                    channelData[i] = pcmData[i] / 32768; // Convert PCM16 to float32
-                }
-                
-                const source = audioContext.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioContext.destination);
-                
-                source.onended = () => {
-                    processAudioQueue();
-                };
-                
-                source.start();
-            } catch (error) {
-                console.error('❌ Audio playback error:', error);
-                processAudioQueue(); // Continue with next chunk
-            }
-        }
 
         // Utility functions
         function arrayBufferToBase64(buffer) {
@@ -1050,202 +1091,41 @@
             }
         }
 
-        // Initialize Web Speech API as fallback
-        function initializeWebSpeech() {
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-                console.log('❌ Web Speech API not supported');
-                return false;
-            }
-            
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SpeechRecognition();
-            
-            recognition.continuous = true;
-            recognition.interimResults = true;
-            recognition.lang = 'en-US';
-            recognition.maxAlternatives = 1;
-            
-            recognition.onstart = () => {
-                console.log('🎤 Web Speech API listening started');
-                setPersonaState('listening', 'Listening (Web Speech)');
-            };
-            
-            recognition.onresult = (event) => {
-                let finalTranscript = '';
-                for (let i = event.resultIndex; i < event.results.length; i++) {
-                    if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
-                    }
-                }
-                
-                if (finalTranscript.trim()) {
-                    console.log('🗣️ Speech recognized:', finalTranscript);
-                    handleSpeechInput(finalTranscript.trim());
-                }
-            };
-            
-            recognition.onerror = (event) => {
-                console.error('❌ Web Speech API error:', event.error);
-                if (event.error === 'no-speech') {
-                    setTimeout(() => recognition.start(), 1000);
-                } else {
-                    setPersonaState('idle', 'Speech error - tap to retry');
-                    setTimeout(() => {
-                        isActivated = false;
-                        showRetryButton();
-                    }, 2000);
-                }
-            };
-            
-            recognition.onend = () => {
-                console.log('🔇 Web Speech API ended');
-                if (voiceMode === 'webspeech' && isActivated) {
-                    setTimeout(() => recognition.start(), 100); // Restart automatically
-                }
-            };
-            
-            console.log('✅ Web Speech API initialized');
-            return true;
-        }
-        
-        // Handle speech input from Web Speech API
-        async function handleSpeechInput(text) {
-            setPersonaState('thinking', 'Processing...');
-            
-            try {
-                // Send to OpenAI Chat API instead of Realtime API
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text })
-                });
-                
-                if (!response.ok) throw new Error('Chat API failed');
-                
-                const data = await response.json();
-                
-                // Use browser's speech synthesis for response
-                speakResponse(data.response);
-                
-            } catch (error) {
-                console.error('❌ Chat API error:', error);
-                setPersonaState('idle', 'Error - tap to retry');
-                setTimeout(() => {
-                    isActivated = false;
-                    showRetryButton();
-                }, 2000);
-            }
-        }
-        
-        // Use Web Speech Synthesis for responses
-        function speakResponse(text) {
-            if ('speechSynthesis' in window) {
-                setPersonaState('speaking', 'Speaking...');
-                
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.voice = speechSynthesis.getVoices().find(voice => 
-                    voice.name.includes('Alloy') || voice.name.includes('Female') || voice.default
-                );
-                utterance.rate = 1.1;
-                utterance.pitch = 1.0;
-                
-                utterance.onend = () => {
-                    setPersonaState('idle', 'Ready');
-                };
-                
-                speechSynthesis.speak(utterance);
-            } else {
-                // Fallback to text display
-                statusText.textContent = text.substring(0, 50) + '...';
-                setTimeout(() => setPersonaState('idle', 'Ready'), 3000);
-            }
-        }
-        
-        // Show retry button for user interaction
-        function showRetryButton() {
-            setPersonaState('idle', 'TAP TO RETRY');
-            touchIndicator.style.display = 'block';
-            touchIndicator.textContent = 'TAP TO RETRY';
-            touchIndicator.classList.add('pulse-hint');
-        }
 
-        // Smart activation handler with fallback tiers
+        // Professional Voice Assistant Activation
         async function activateAssistant() {
             if (!isActivated) {
                 isActivated = true;
                 touchIndicator.textContent = 'ACTIVATING...';
                 touchIndicator.classList.remove('pulse-hint');
                 
-                setPersonaState('idle', 'INITIALIZING...');
+                setPersonaState('idle', 'INITIALIZING PROFESSIONAL VOICE AI...');
                 
-                // Try Tier 1: OpenAI Realtime API
-                if (voiceMode === 'realtime' && realtimeFailures < maxRealtimeFailures) {
-                    console.log('🎯 Attempting Tier 1: OpenAI Realtime API');
-                    const audioInitialized = await initializeAudio();
-                    if (audioInitialized) {
-                        await connectToRealtimeAPI();
-                        setTimeout(() => {
-                            touchIndicator.style.display = 'none';
-                        }, 2000);
-                        return;
-                    }
+                console.log('🎯 Initializing Industry-Grade OpenAI Realtime Voice Assistant');
+                
+                // Initialize professional audio system
+                const audioInitialized = await initializeAudio();
+                if (!audioInitialized) {
+                    setPersonaState('idle', 'Microphone access required');
+                    isActivated = false;
+                    setTimeout(() => {
+                        touchIndicator.style.display = 'block';
+                        touchIndicator.textContent = 'TAP TO RETRY';
+                        touchIndicator.classList.add('pulse-hint');
+                    }, 3000);
+                    return;
                 }
                 
-                // Try Tier 2: Web Speech API + Chat API
-                if (voiceMode !== 'text') {
-                    console.log('🎯 Falling back to Tier 2: Web Speech API');
-                    voiceMode = 'webspeech';
-                    const speechInitialized = initializeWebSpeech();
-                    if (speechInitialized) {
-                        recognition.start();
-                        setTimeout(() => {
-                            touchIndicator.style.display = 'none';
-                        }, 2000);
-                        return;
-                    }
-                }
+                // Connect to OpenAI Realtime API
+                await connectToRealtimeAPI();
                 
-                // Tier 3: Text-only mode
-                console.log('🎯 Falling back to Tier 3: Text-only mode');
-                voiceMode = 'text';
-                setPersonaState('idle', 'Text mode - type to chat');
-                initializeTextMode();
+                // Hide activation indicator
+                setTimeout(() => {
+                    touchIndicator.style.display = 'none';
+                }, 2000);
             }
         }
         
-        // Initialize text-only chat interface
-        function initializeTextMode() {
-            // Add a simple text input overlay
-            const textInput = document.createElement('input');
-            textInput.type = 'text';
-            textInput.placeholder = 'Type your message...';
-            textInput.style.cssText = `
-                position: fixed; 
-                bottom: 20px; 
-                left: 50%; 
-                transform: translateX(-50%);
-                padding: 12px;
-                background: rgba(26, 26, 46, 0.9);
-                border: 1px solid rgba(0, 255, 255, 0.5);
-                border-radius: 8px;
-                color: #0ff;
-                font-family: 'Orbitron', monospace;
-                width: 300px;
-                z-index: 1000;
-            `;
-            
-            textInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter' && textInput.value.trim()) {
-                    handleSpeechInput(textInput.value.trim());
-                    textInput.value = '';
-                }
-            });
-            
-            document.body.appendChild(textInput);
-            textInput.focus();
-            
-            touchIndicator.style.display = 'none';
-        }
         
         // Codespace configuration helpers
         function showCodespaceConfig() {
