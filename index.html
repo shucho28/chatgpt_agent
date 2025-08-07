@@ -658,12 +658,25 @@
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
                     
+                    // Check if we have valid audio input
+                    if (!inputData || inputData.length === 0) {
+                        return; // Skip empty audio
+                    }
+                    
                     // Convert to PCM16 format (as expected by OpenAI default session)
                     const pcm16Data = new Int16Array(inputData.length);
+                    let maxAmplitude = 0;
                     
                     for (let i = 0; i < inputData.length; i++) {
                         // Convert float32 (-1.0 to 1.0) to PCM16 (-32768 to 32767)
-                        pcm16Data[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                        const sample = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                        pcm16Data[i] = sample;
+                        maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
+                    }
+                    
+                    // Skip silent audio chunks to reduce server load
+                    if (maxAmplitude < 50) {
+                        return; // Skip very quiet audio
                     }
                     
                     // Send audio data in PCM16 format as expected by OpenAI
@@ -676,6 +689,16 @@
                     // Log audio data being sent (only occasionally to avoid spam)
                     if (Math.random() < 0.001) { // Log ~0.1% of audio chunks
                         console.log('📤 Sent audio chunk:', pcm16Data.length, 'samples');
+                        
+                        // Check for invalid audio data
+                        let hasValidAudio = false;
+                        for (let i = 0; i < Math.min(100, pcm16Data.length); i++) {
+                            if (Math.abs(pcm16Data[i]) > 100) {
+                                hasValidAudio = true;
+                                break;
+                            }
+                        }
+                        console.log('📤 Audio has signal:', hasValidAudio);
                     }
                 } catch (error) {
                     console.error('❌ Audio processing error:', error);
