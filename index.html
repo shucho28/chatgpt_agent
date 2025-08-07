@@ -528,6 +528,15 @@
                     setTimeout(() => {
                         modeIndicator.classList.remove('visible');
                     }, 3000);
+                    
+                    // Add timeout to detect if session.created never arrives
+                    setTimeout(() => {
+                        if (!isSessionReady) {
+                            console.warn('⚠️ No session.created received after 10 seconds');
+                            console.log('🔧 This might indicate a server-side issue');
+                            setPersonaState('idle', 'Session timeout - check server');
+                        }
+                    }, 10000);
                 };
                 
                 realtimeSocket.onmessage = handleRealtimeMessage;
@@ -659,6 +668,7 @@
             try {
                 if (typeof event.data === 'string') {
                     message = JSON.parse(event.data);
+                    console.log('📨 Received text message:', message.type, message);
                 } else {
                     // Binary data (audio) - convert to text first or handle separately
                     console.log('📦 Received binary data:', event.data);
