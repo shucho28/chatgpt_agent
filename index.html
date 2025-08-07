@@ -518,6 +518,9 @@
         let heartbeatInterval = null;
         let preventClose = false;
         
+        // TEMPORARY: Disable audio sending due to OpenAI server issues (Jan 23, 2025)
+        const DISABLE_AUDIO_SENDING = false; // Set to true to test without audio
+        
         // Memory management configuration
         const MEMORY_MANAGEMENT = {
             MAX_BUFFER_SIZE: 48000, // 2 seconds at 24kHz
@@ -850,7 +853,7 @@
             // Wait for session to be fully ready with extended delay
             const timeSinceSession = Date.now() - sessionStartTime;
             if (!isConnected || !isSessionReady || 
-                timeSinceSession < 5000 || // Extended to 5 seconds
+                timeSinceSession < 10000 || // Extended to 10 seconds due to OpenAI issues
                 !realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN) {
                 return;
             }
@@ -943,9 +946,20 @@
                 return;
             }
             
-            // Additional safety check - don't send if we just connected
+            // ULTRA-CONSERVATIVE: Wait even longer due to OpenAI server issues since Jan 23, 2025
             const timeSinceSession = Date.now() - sessionStartTime;
-            if (timeSinceSession < 5000) {
+            if (timeSinceSession < 10000) { // Increased to 10 seconds
+                return;
+            }
+            
+            // Additional safety: Only send audio if we haven't had any errors yet
+            if (connectionAttempts > 0) {
+                return; // Skip audio sending if we've had connection issues
+            }
+            
+            // TEMPORARY WORKAROUND: Disable audio sending entirely to test session stability
+            if (DISABLE_AUDIO_SENDING) {
+                console.log('🚫 Audio sending disabled (DISABLE_AUDIO_SENDING = true)');
                 return;
             }
             
