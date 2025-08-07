@@ -608,6 +608,42 @@
             }
         }
 
+        // Send a test audio buffer to validate the connection
+        function sendTestAudioBuffer() {
+            if (!isConnected || !isSessionReady || !realtimeSocket || realtimeSocket.readyState !== WebSocket.OPEN) {
+                console.log('⚠️ Not ready for test audio');
+                return;
+            }
+            
+            console.log('🧪 Sending test audio buffer...');
+            
+            // Create a simple sine wave test audio (440Hz tone for 100ms)
+            const sampleRate = 24000;
+            const duration = 0.1; // 100ms
+            const frequency = 440; // A4 note
+            const samples = Math.floor(sampleRate * duration);
+            
+            const testAudio = new Int16Array(samples);
+            for (let i = 0; i < samples; i++) {
+                const t = i / sampleRate;
+                const amplitude = 0.1 * Math.sin(2 * Math.PI * frequency * t); // Low volume
+                testAudio[i] = Math.round(amplitude * 32767);
+            }
+            
+            const testMessage = JSON.stringify({
+                type: 'input_audio_buffer.append',
+                audio: arrayBufferToBase64(testAudio.buffer)
+            });
+            
+            console.log('🧪 Test audio:', {
+                samples: testAudio.length,
+                bufferSize: testAudio.buffer.byteLength,
+                maxAmplitude: Math.max(...testAudio.map(Math.abs))
+            });
+            
+            realtimeSocket.send(testMessage);
+        }
+
         // Start real-time audio streaming with modern Web Audio API
         function startRealtimeAudio() {
             if (!isConnected || !isSessionReady || !audioStream || !audioContext) {
@@ -713,27 +749,24 @@
                         return;
                     }
                     
+                    // Log the first few audio chunks for debugging
+                    const currentTime = Date.now();
+                    const timeSinceSession = currentTime - sessionStartTime;
+                    if (timeSinceSession < 10000) { // Log first 10 seconds of audio
+                        console.log(`📤 Sending audio chunk (${timeSinceSession}ms after session):`, {
+                            samples: pcm16Data.length,
+                            maxAmplitude: maxAmplitude,
+                            bufferSize: pcm16Data.buffer.byteLength,
+                            firstSamples: Array.from(pcm16Data.slice(0, 10))
+                        });
+                    }
+                    
                     // Send audio data in PCM16 format as expected by OpenAI
                     const audioMessage = JSON.stringify({
                         type: 'input_audio_buffer.append',
                         audio: arrayBufferToBase64(pcm16Data.buffer)
                     });
                     realtimeSocket.send(audioMessage);
-                    
-                    // Log audio data being sent (only occasionally to avoid spam)
-                    if (Math.random() < 0.001) { // Log ~0.1% of audio chunks
-                        console.log('📤 Sent audio chunk:', pcm16Data.length, 'samples');
-                        
-                        // Check for invalid audio data
-                        let hasValidAudio = false;
-                        for (let i = 0; i < Math.min(100, pcm16Data.length); i++) {
-                            if (Math.abs(pcm16Data[i]) > 100) {
-                                hasValidAudio = true;
-                                break;
-                            }
-                        }
-                        console.log('📤 Audio has signal:', hasValidAudio);
-                    }
                 } catch (error) {
                     console.error('❌ Audio processing error:', error);
                 }
@@ -813,7 +846,15 @@
                     // Wait a moment before starting audio to avoid immediate errors
                     setTimeout(() => {
                         if (isSessionReady && isConnected) {
-                            startRealtimeAudio();
+                            // Send a test audio buffer first to validate the connection
+                            sendTestAudioBuffer();
+                            
+                            // Then start real audio streaming after another delay
+                            setTimeout(() => {
+                                if (isSessionReady && isConnected) {
+                                    startRealtimeAudio();
+                                }
+                            }, 1000);
                         }
                     }, 2000); // Increased delay to ensure session is fully ready
                     break;
