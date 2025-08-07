@@ -145,7 +145,15 @@ wss.on('connection', (clientWs, req) => {
                 console.log('✅ Session created, setting ready state');
                 isSessionReady = true;
                 
-                // Process queued messages (except session.update which was already sent)
+                // FIRST: Forward session.created to client immediately
+                if (clientWs.readyState === WebSocket.OPEN) {
+                    console.log('📤 Forwarding session.created to client');
+                    clientWs.send(data);
+                } else {
+                    console.error('❌ Client WebSocket not ready for session.created!');
+                }
+                
+                // THEN: Process queued messages (except session.update which was already sent)
                 const nonSessionMessages = messageQueue.filter(msg => {
                     try {
                         const parsed = JSON.parse(msg);
@@ -164,6 +172,7 @@ wss.on('connection', (clientWs, req) => {
                 
                 // Clear the queue
                 messageQueue = [];
+                return; // Don't forward session.created again below
             }
             
             // Log error messages with full details
