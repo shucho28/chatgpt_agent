@@ -515,12 +515,10 @@
                 realtimeSocket = new WebSocket(wsUrl);
                 
                 realtimeSocket.onopen = () => {
-                    console.log('✅ Connected to Realtime API');
+                    console.log('✅ Connected to Realtime API proxy');
+                    console.log('🔧 Keeping connection alive, waiting for session.created...');
                     
-                    // Do NOT send session.update immediately - wait for session.created
-                    console.log('🔧 Waiting for session.created before configuring...');
-                    
-                    setPersonaState('idle', 'Waiting for session...');
+                    setPersonaState('idle', 'Connected, waiting for session...');
                     isConnected = true;
 
                     // Show mode indicator
@@ -529,14 +527,24 @@
                         modeIndicator.classList.remove('visible');
                     }, 3000);
                     
+                    // Keep connection alive - send a ping if needed
+                    const keepAlive = setInterval(() => {
+                        if (realtimeSocket && realtimeSocket.readyState === WebSocket.OPEN && !isSessionReady) {
+                            console.log('🔄 Keeping connection alive, still waiting for session...');
+                        } else {
+                            clearInterval(keepAlive);
+                        }
+                    }, 2000);
+                    
                     // Add timeout to detect if session.created never arrives
                     setTimeout(() => {
                         if (!isSessionReady) {
-                            console.warn('⚠️ No session.created received after 10 seconds');
-                            console.log('🔧 This might indicate a server-side issue');
-                            setPersonaState('idle', 'Session timeout - check server');
+                            console.warn('⚠️ No session.created received after 15 seconds');
+                            console.log('🔧 Server logs show session.created sent, but client not receiving');
+                            setPersonaState('idle', 'Session timeout - message forwarding issue');
                         }
-                    }, 10000);
+                        clearInterval(keepAlive);
+                    }, 15000);
                 };
                 
                 realtimeSocket.onmessage = handleRealtimeMessage;
@@ -683,13 +691,14 @@
 
             switch (message.type) {
                 case 'session.created':
-                    console.log('✅ Realtime session created');
+                    console.log('✅ Realtime session created - CLIENT RECEIVED!');
+                    console.log('🎯 Session details:', message.session);
                     connectionAttempts = 0; // Reset retry counter on success
                     
                     // CRITICAL TEST: Don't send ANY session.update - use pure defaults
                     console.log('🔧 Using OpenAI defaults: PCM16 audio, alloy voice, server VAD');
                     isSessionReady = true;
-                    setPersonaState('idle', 'Ready - PCM16 format');
+                    setPersonaState('idle', 'Ready! Speak now');
                     startRealtimeAudio();
                     break;
                 
