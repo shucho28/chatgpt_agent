@@ -674,8 +674,8 @@
                         maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
                     }
                     
-                    // Skip silent audio chunks to reduce server load
-                    if (maxAmplitude < 50) {
+                    // Skip silent audio chunks to reduce server load (more lenient threshold)
+                    if (maxAmplitude < 100) {
                         return; // Skip very quiet audio
                     }
                     
@@ -774,7 +774,13 @@
                     console.log('🔧 Using OpenAI defaults: PCM16 audio, alloy voice, server VAD');
                     isSessionReady = true;
                     setPersonaState('idle', 'Ready! Speak now');
-                    startRealtimeAudio();
+                    
+                    // Wait a moment before starting audio to avoid immediate errors
+                    setTimeout(() => {
+                        if (isSessionReady && isConnected) {
+                            startRealtimeAudio();
+                        }
+                    }, 1000);
                     break;
                 
                 case 'session.updated':
@@ -811,21 +817,33 @@
                 case 'error':
                     console.error('❌ Realtime API error:', message.error);
                     
-                    // Handle server errors with retry logic
+                    // Handle server errors with exponential backoff retry logic
                     if (message.error?.type === 'server_error' && connectionAttempts < maxRetries) {
                         connectionAttempts++;
-                        console.log(`🔄 Retrying connection (${connectionAttempts}/${maxRetries}) in 2 seconds...`);
+                        const delay = Math.min(1000 * Math.pow(2, connectionAttempts - 1), 10000); // Exponential backoff, max 10s
+                        console.log(`🔄 OpenAI server error - retrying (${connectionAttempts}/${maxRetries}) in ${delay/1000}s...`);
                         setPersonaState('idle', `Retrying... (${connectionAttempts}/${maxRetries})`);
                         
                         setTimeout(() => {
                             if (realtimeSocket) {
                                 realtimeSocket.close();
                             }
+                            // Reset session state before reconnecting
+                            isSessionReady = false;
+                            isConnected = false;
                             connectToRealtimeAPI();
-                        }, 2000);
+                        }, delay);
                     } else {
-                        setPersonaState('idle', 'Error occurred');
+                        setPersonaState('idle', 'OpenAI server error - try again');
                         connectionAttempts = 0;
+                        
+                        // Allow user to retry manually after server errors
+                        setTimeout(() => {
+                            isActivated = false;
+                            setPersonaState('idle', 'TAP TO RETRY');
+                            touchIndicator.style.display = 'block';
+                            touchIndicator.textContent = 'TAP TO RETRY';
+                        }, 3000);
                     }
                     break;
             }
