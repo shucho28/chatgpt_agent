@@ -480,6 +480,7 @@
         let connectionAttempts = 0;
         let maxRetries = 3;
         let preventClose = false; // Flag to prevent accidental closure
+        let sessionStartTime = 0; // Track when session was created
 
         // Initialize audio context and microphone
         async function initializeAudio() {
@@ -655,6 +656,11 @@
                     return;
                 }
                 
+                // Don't send audio data immediately after session creation
+                if (Date.now() - sessionStartTime < 3000) {
+                    return; // Wait 3 seconds after session creation
+                }
+                
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
                     
@@ -663,20 +669,48 @@
                         return; // Skip empty audio
                     }
                     
+                    // Validate input audio data first
+                    if (!inputData || inputData.length === 0 || inputData.length !== 4096) {
+                        return; // Skip invalid audio chunks
+                    }
+                    
+                    // Check for NaN or infinite values in input
+                    let hasValidSamples = false;
+                    for (let i = 0; i < inputData.length; i++) {
+                        if (!isFinite(inputData[i])) {
+                            console.warn('⚠️ Invalid audio sample detected, skipping chunk');
+                            return;
+                        }
+                        if (Math.abs(inputData[i]) > 0.001) {
+                            hasValidSamples = true;
+                        }
+                    }
+                    
+                    // Skip chunks with no meaningful audio signal
+                    if (!hasValidSamples) {
+                        return;
+                    }
+                    
                     // Convert to PCM16 format (as expected by OpenAI default session)
                     const pcm16Data = new Int16Array(inputData.length);
                     let maxAmplitude = 0;
                     
                     for (let i = 0; i < inputData.length; i++) {
                         // Convert float32 (-1.0 to 1.0) to PCM16 (-32768 to 32767)
-                        const sample = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                        const sample = Math.max(-32768, Math.min(32767, Math.round(inputData[i] * 32767)));
                         pcm16Data[i] = sample;
                         maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
                     }
                     
-                    // Skip silent audio chunks to reduce server load (more lenient threshold)
-                    if (maxAmplitude < 100) {
+                    // Skip silent audio chunks - more conservative threshold
+                    if (maxAmplitude < 200) {
                         return; // Skip very quiet audio
+                    }
+                    
+                    // Validate PCM16 data before sending
+                    if (pcm16Data.length === 0 || pcm16Data.buffer.byteLength === 0) {
+                        console.warn('⚠️ Empty PCM16 buffer, skipping');
+                        return;
                     }
                     
                     // Send audio data in PCM16 format as expected by OpenAI
@@ -769,6 +803,7 @@
                     console.log('✅ Realtime session created - CLIENT RECEIVED!');
                     console.log('🎯 Session details:', message.session);
                     connectionAttempts = 0; // Reset retry counter on success
+                    sessionStartTime = Date.now(); // Track session start time
                     
                     // CRITICAL TEST: Don't send ANY session.update - use pure defaults
                     console.log('🔧 Using OpenAI defaults: PCM16 audio, alloy voice, server VAD');
@@ -780,7 +815,7 @@
                         if (isSessionReady && isConnected) {
                             startRealtimeAudio();
                         }
-                    }, 1000);
+                    }, 2000); // Increased delay to ensure session is fully ready
                     break;
                 
                 case 'session.updated':
