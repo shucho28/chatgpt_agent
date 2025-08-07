@@ -653,35 +653,10 @@
             
             console.log('🎤 Starting MediaRecorder-based audio streaming...');
             
-            // Use MediaRecorder for more reliable audio capture
-            try {
-                const mediaRecorder = new MediaRecorder(audioStream, {
-                    mimeType: 'audio/webm;codecs=opus',
-                    audioBitsPerSecond: 48000
-                });
-                
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0 && isConnected && isSessionReady) {
-                        handleAudioData(event.data);
-                    }
-                };
-                
-                mediaRecorder.onerror = (error) => {
-                    console.error('❌ MediaRecorder error:', error);
-                };
-                
-                // Record in small chunks for real-time processing
-                mediaRecorder.start(250); // 250ms chunks
-                
-                console.log('✅ MediaRecorder audio streaming active');
-                
-                // Store reference for cleanup
-                window.currentMediaRecorder = mediaRecorder;
-                
-            } catch (error) {
-                console.error('❌ MediaRecorder not supported, falling back to manual processing');
-                startLegacyAudioProcessing();
-            }
+            // MediaRecorder produces compressed audio, but OpenAI Realtime API expects PCM16
+            // For now, use legacy ScriptProcessor approach for PCM16 compatibility
+            console.log('🔄 OpenAI session expects PCM16 format, using ScriptProcessor');
+            startLegacyAudioProcessing();
         }
         
         // Handle audio data from MediaRecorder
@@ -692,23 +667,12 @@
             }
             
             try {
-                // Convert blob to base64 for sending to OpenAI
-                const arrayBuffer = await audioBlob.arrayBuffer();
-                const base64Audio = arrayBufferToBase64(arrayBuffer);
+                console.log('❌ MediaRecorder produces Opus/WebM but session expects PCM16');
+                console.log('🔄 Converting to legacy processing for PCM16 compatibility');
                 
-                console.log('📤 Sending MediaRecorder audio:', {
-                    blobSize: audioBlob.size,
-                    mimeType: audioBlob.type,
-                    bufferSize: arrayBuffer.byteLength,
-                    timeSinceSession: Date.now() - sessionStartTime
-                });
-                
-                const audioMessage = JSON.stringify({
-                    type: 'input_audio_buffer.append',
-                    audio: base64Audio
-                });
-                
-                realtimeSocket.send(audioMessage);
+                // MediaRecorder produces compressed audio, but OpenAI session expects PCM16
+                // We need to stick with the legacy approach for now
+                return;
                 
             } catch (error) {
                 console.error('❌ Error processing MediaRecorder audio:', error);
@@ -735,22 +699,46 @@
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
                     
+                    // Strict validation
                     if (!inputData || inputData.length !== 4096) {
                         return;
                     }
                     
-                    // Convert to PCM16 format
-                    const pcm16Data = new Int16Array(inputData.length);
-                    let maxAmplitude = 0;
-                    
+                    // Check for invalid samples
                     for (let i = 0; i < inputData.length; i++) {
-                        const sample = Math.max(-32768, Math.min(32767, Math.round(inputData[i] * 32767)));
-                        pcm16Data[i] = sample;
-                        maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
+                        if (!isFinite(inputData[i]) || isNaN(inputData[i])) {
+                            console.warn('⚠️ Invalid audio sample, skipping chunk');
+                            return;
+                        }
                     }
                     
-                    if (maxAmplitude < 200) {
-                        return;
+                    // Convert to PCM16 format with careful bounds checking
+                    const pcm16Data = new Int16Array(inputData.length);
+                    let maxAmplitude = 0;
+                    let hasSignal = false;
+                    
+                    for (let i = 0; i < inputData.length; i++) {
+                        // More conservative scaling
+                        const scaled = inputData[i] * 16384; // Use 16384 instead of 32767 for safety margin
+                        const sample = Math.max(-16384, Math.min(16384, Math.round(scaled)));
+                        pcm16Data[i] = sample;
+                        const amplitude = Math.abs(sample);
+                        maxAmplitude = Math.max(maxAmplitude, amplitude);
+                        if (amplitude > 50) hasSignal = true;
+                    }
+                    
+                    // More conservative thresholds
+                    if (!hasSignal || maxAmplitude < 100) {
+                        return; // Skip very quiet or empty audio
+                    }
+                    
+                    // Log occasionally for debugging
+                    if (Math.random() < 0.01) { // 1% of chunks
+                        console.log('📤 Sending audio:', {
+                            maxAmplitude,
+                            samples: pcm16Data.length,
+                            timeSince: Date.now() - sessionStartTime
+                        });
                     }
                     
                     const audioMessage = JSON.stringify({
@@ -838,15 +826,8 @@
                     // Wait a moment before starting audio to avoid immediate errors
                     setTimeout(() => {
                         if (isSessionReady && isConnected) {
-                            // Send a test audio buffer first to validate the connection
-                            sendTestAudioBuffer();
-                            
-                            // Then start real audio streaming after another delay
-                            setTimeout(() => {
-                                if (isSessionReady && isConnected) {
-                                    startRealtimeAudio();
-                                }
-                            }, 1000);
+                            // Skip test audio buffer for now - just start real audio
+                            startRealtimeAudio();
                         }
                     }, 2000); // Increased delay to ensure session is fully ready
                     break;
