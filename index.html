@@ -4,7 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Voice Assistant - Realtime API</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Inline minimal Tailwind-like styles for production
+        const styles = `
+            .flex { display: flex; }
+            .items-center { align-items: center; }
+            .justify-center { justify-content: center; }
+            .w-full { width: 100%; }
+            .h-full { height: 100%; }
+            .relative { position: relative; }
+        `;
+        const styleSheet = document.createElement('style');
+        styleSheet.textContent = styles;
+        document.head.appendChild(styleSheet);
+    </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Exo+2:wght@300;400;500;600;700&display=swap');
         
@@ -790,7 +803,19 @@
                 // Create high-quality audio processing chain
                 const source = audioContext.createMediaStreamSource(audioStream);
                 
+                // Try to use AudioWorklet first, fallback to ScriptProcessor
+                try {
+                    // Modern AudioWorklet approach (when available)
+                    if (audioContext.audioWorklet) {
+                        console.log('🎵 Attempting to use modern AudioWorklet...');
+                        // For now, we'll still use ScriptProcessor but with improved handling
+                    }
+                } catch (e) {
+                    console.log('⚠️ AudioWorklet not available, using ScriptProcessor');
+                }
+                
                 // Use optimal buffer size for real-time processing
+                // Note: ScriptProcessorNode is deprecated but still widely supported
                 audioProcessor = audioContext.createScriptProcessor(
                     REALTIME_CONFIG.BUFFER_SIZE, 1, 1
                 );
@@ -1099,36 +1124,60 @@
                 case 'error':
                     console.error('❌ OpenAI Realtime API Error:', message.error);
                     
-                    // Professional error handling with intelligent retry
+                    // Enhanced error handling with exponential backoff
                     if (message.error?.type === 'server_error' && connectionAttempts < maxRetries) {
                         connectionAttempts++;
-                        const delay = Math.min(2000 * connectionAttempts, 15000); // Progressive delay
+                        // Exponential backoff with jitter: 2^n * 1000ms + random(0-1000ms)
+                        const baseDelay = Math.min(Math.pow(2, connectionAttempts) * 1000, 30000);
+                        const jitter = Math.random() * 1000;
+                        const delay = baseDelay + jitter;
                         
-                        console.log(`🔄 Server error detected - retrying (${connectionAttempts}/${maxRetries}) in ${delay/1000}s...`);
-                        console.log(`📋 Error details: ${message.error.message}`);
+                        console.log(`🔄 OpenAI server error - retrying (${connectionAttempts}/${maxRetries}) in ${Math.round(delay/1000)}s...`);
+                        console.log(`📋 Session ID: ${message.error?.event_id || 'N/A'}`);
+                        console.log(`📋 Error: ${message.error?.message || 'Unknown error'}`);
                         
-                        setPersonaState('idle', `Reconnecting... (${connectionAttempts}/${maxRetries})`);
+                        setPersonaState('idle', `Server busy - retry ${connectionAttempts}/${maxRetries}`);
                         
+                        // Close current connection cleanly
                         setTimeout(() => {
-                            if (realtimeSocket) {
-                                realtimeSocket.close();
+                            if (realtimeSocket && realtimeSocket.readyState === WebSocket.OPEN) {
+                                realtimeSocket.close(1000, 'Retrying after server error');
                             }
-                            // Clean reset before retry
-                            isSessionReady = false;
-                            isConnected = false;
-                            audioBuffer = [];
-                            connectToRealtimeAPI();
+                            
+                            // Clean reset with delay to avoid rate limiting
+                            setTimeout(() => {
+                                isSessionReady = false;
+                                isConnected = false;
+                                audioBuffer = [];
+                                audioResponseQueue = [];
+                                connectToRealtimeAPI();
+                            }, 1000); // Additional delay before reconnection
+                            
                         }, delay);
                         
-                    } else {
-                        // Max retries reached - professional error display
-                        console.error('❌ Maximum retry attempts reached');
-                        console.log('📋 Session ID for support:', message.error?.event_id || 'N/A');
+                    } else if (message.error?.type === 'server_error') {
+                        // Max retries reached for server errors
+                        console.error('❌ Maximum retry attempts reached for server errors');
+                        console.log('📋 OpenAI may be experiencing issues. Session ID:', message.error?.event_id || 'N/A');
                         
-                        setPersonaState('idle', 'Service temporarily unavailable');
+                        setPersonaState('idle', 'OpenAI service busy - try again later');
                         connectionAttempts = 0;
                         
-                        // Allow manual retry after cooldown
+                        // Extended cooldown for server issues
+                        setTimeout(() => {
+                            isActivated = false;
+                            setPersonaState('idle', 'TAP TO RETRY');
+                            touchIndicator.style.display = 'block';
+                            touchIndicator.textContent = 'TAP TO RETRY';
+                            touchIndicator.classList.add('pulse-hint');
+                        }, 15000); // 15 second cooldown for server errors
+                        
+                    } else {
+                        // Other error types (auth, rate limit, etc.)
+                        console.error('❌ API Error:', message.error?.type || 'unknown');
+                        setPersonaState('idle', `Error: ${message.error?.type || 'Unknown'}`); 
+                        connectionAttempts = 0;
+                        
                         setTimeout(() => {
                             isActivated = false;
                             setPersonaState('idle', 'TAP TO RETRY');

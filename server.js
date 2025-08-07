@@ -27,9 +27,11 @@ if (!OPENAI_API_KEY || !OPENAI_API_KEY.startsWith('sk-')) {
 console.log('🔑 API Key loaded:', OPENAI_API_KEY.substring(0, 10) + '...' + OPENAI_API_KEY.substring(OPENAI_API_KEY.length - 4));
 
 
-// Test API key with a simple request
+// Enhanced API key validation and testing
 async function testAPIKey() {
     try {
+        console.log('🔍 Testing API key validity...');
+        
         const response = await fetch('https://api.openai.com/v1/models', {
             headers: {
                 'Authorization': `Bearer ${OPENAI_API_KEY}`,
@@ -40,17 +42,33 @@ async function testAPIKey() {
         if (response.ok) {
             const data = await response.json();
             const realtimeModel = data.data.find(model => model.id.includes('realtime'));
+            
             if (realtimeModel) {
                 console.log('✅ API key valid and has Realtime API access');
+                console.log('📋 Available realtime model:', realtimeModel.id);
             } else {
                 console.log('⚠️ API key valid but no Realtime API models found');
                 console.log('💡 You may need to request access to OpenAI Realtime API');
+                console.log('📋 Available models:', data.data.length);
             }
+        } else if (response.status === 401) {
+            console.error('❌ API key authentication failed - invalid key');
+            console.error('💡 Please check your OPENAI_API_KEY environment variable');
+            process.exit(1);
+        } else if (response.status === 429) {
+            console.error('⚠️ Rate limited during API key test');
+            console.log('💡 API key appears valid but hitting rate limits');
         } else {
             console.error('❌ API key test failed:', response.status, response.statusText);
+            if (response.status >= 500) {
+                console.log('💡 OpenAI service may be experiencing issues');
+            }
         }
     } catch (error) {
         console.error('❌ API key test error:', error.message);
+        if (error.message.includes('ENOTFOUND')) {
+            console.error('💡 Network connectivity issue - check internet connection');
+        }
     }
 }
 
@@ -168,17 +186,25 @@ wss.on('connection', (clientWs, req) => {
     let messageQueue = [];
     let isSessionReady = false;
     
-    // Connect to OpenAI Realtime API
+    // Connect to OpenAI Realtime API with enhanced error handling
     const openaiUrl = `wss://api.openai.com/v1/realtime?model=${model}`;
-    console.log('🚀 Connecting to OpenAI:', openaiUrl);
+    console.log('🚀 Connecting to OpenAI:', openaiUrl.replace(OPENAI_API_KEY, '***'));
     
-    const openaiWs = new WebSocket(openaiUrl, {
-        headers: {
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'OpenAI-Beta': 'realtime=v1',
-            'User-Agent': 'OpenAI-Realtime-Proxy/1.0.0'
-        }
-    });
+    let openaiWs;
+    try {
+        openaiWs = new WebSocket(openaiUrl, {
+            headers: {
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                'OpenAI-Beta': 'realtime=v1',
+                'User-Agent': 'OpenAI-Realtime-Proxy/1.0.0'
+            }
+        });
+    } catch (error) {
+        console.error('❌ Failed to create OpenAI WebSocket connection:', error.message);
+        clientWs.close(1011, 'OpenAI connection failed');
+        cleanupConnection(clientId);
+        return;
+    }
     
     // Forward messages from client to OpenAI
     clientWs.on('message', (data) => {
