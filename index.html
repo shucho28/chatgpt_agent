@@ -422,12 +422,21 @@
             const hostname = window.location.hostname;
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             
-            // Production deployments
+            // Check for local development first
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                const port = window.location.port || '8080';
+                const localUrl = `ws://localhost:${port}/realtime`;
+                console.log('🔧 Using local development server');
+                return localUrl;
+            }
+            
+            // Production deployments - try multiple options
             if (hostname === 'shucho.space') {
-                // Use Railway deployment (supports WebSockets natively)
-                const railwayUrl = 'wss://openai-realtime-proxy-production-710a.up.railway.app/realtime';
+                console.log('🔧 Production mode - Railway server may be down');
+                console.log('💡 For working voice assistant, see README_VOICE_SETUP.md');
                 
-                console.log('🔧 Using Railway deployment (WebSocket compatible)');
+                // Try Railway server (may not be accessible)
+                const railwayUrl = 'wss://openai-realtime-proxy-production-710a.up.railway.app/realtime';
                 return railwayUrl;
                 
                 // Fallback: Try codespace detection if Vercel fails
@@ -680,16 +689,17 @@
                 realtimeSocket.onerror = (error) => {
                     console.error('❌ Realtime WebSocket error:', error);
                     console.error('❌ Attempted URL:', PROXY_URL);
+                    console.error('💡 SOLUTION: Run local server with "node simple_server.js"');
                     
                     // Provide specific error messages based on URL
-                    if (PROXY_URL.includes('vercel.app') || PROXY_URL.includes('railway.app') || PROXY_URL.includes('onrender.com')) {
-                        setPersonaState('idle', 'Server deployment needed');
+                    if (PROXY_URL.includes('railway.app')) {
+                        setPersonaState('idle', 'Railway server down - see README for local setup');
                     } else if (PROXY_URL.includes('app.github.dev')) {
                         setPersonaState('idle', 'Codespace server offline');
                     } else if (PROXY_URL.includes('localhost')) {
-                        setPersonaState('idle', 'Local server not running');
+                        setPersonaState('idle', 'Local server not running - see README');
                     } else {
-                        setPersonaState('idle', 'Connection failed');
+                        setPersonaState('idle', 'Connection failed - check setup');
                     }
                 };
                 
