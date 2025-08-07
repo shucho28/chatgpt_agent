@@ -1,11 +1,14 @@
 {
-  "name": "openai-realtime-proxy",
+  "name": "openai-realtime-voice-assistant",
   "version": "1.0.0",
-  "description": "WebSocket proxy server for OpenAI Realtime API authentication",
+  "description": "OpenAI Realtime API Voice Assistant with WebSocket proxy",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "simple": "node simple_server.js",
+    "test": "node test_openai_api.js",
+    "test-api": "node test_openai_api.js"
   },
   "dependencies": {
     "ws": "^8.14.2"
@@ -19,7 +22,8 @@
     "websocket",
     "proxy",
     "voice",
-    "assistant"
+    "assistant",
+    "api-test"
   ],
   "author": "AI Voice Assistant",
   "license": "MIT"
